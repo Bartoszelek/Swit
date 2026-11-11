@@ -15,6 +15,9 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
+/** Zaokrąglenie odporne na brakujące dane (NaN) – bez tego brak jednej wartości w prognozie zamykał aplikację. */
+fun Double.ri(): Int = if (isNaN() || isInfinite()) 0 else roundToInt()
+
 /** Miejsce prognozy. gps = „Moja lokalizacja” (współrzędne odświeżane z telefonu). */
 class Place(val name: String, val lat: Double, val lon: Double, val gps: Boolean = false) {
     fun json(): JSONObject = JSONObject().put("n", name).put("la", lat).put("lo", lon).put("g", gps)
@@ -179,7 +182,7 @@ object Weather {
         else -> R.drawable.w_cloud
     }
 
-    fun deg(v: Double) = "${v.roundToInt()}°"
+    fun deg(v: Double) = if (v.isNaN()) "--°" else "${v.ri()}°"
 
     fun windDir(d: Int) = listOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[((d + 22) % 360) / 45]
 
@@ -212,16 +215,16 @@ object Weather {
         val d0 = f.days.firstOrNull()
         val d1 = f.days.getOrNull(1)
         val gust = listOfNotNull(d0?.gusts, f.gusts).maxOrNull() ?: 0.0
-        if (gust >= 70) out += "wind" to "Silny wiatr – porywy do ${gust.roundToInt()} km/h"
+        if (gust >= 70) out += "wind" to "Silny wiatr – porywy do ${gust.ri()} km/h"
         val rain24 = hrs.sumOf { it.rain }
-        if (rain24 >= 20) out += "rain" to "Intensywne opady – ok. ${rain24.roundToInt()} mm w ciągu doby"
+        if (rain24 >= 20) out += "rain" to "Intensywne opady – ok. ${rain24.ri()} mm w ciągu doby"
         if (hrs.any { it.code in listOf(56, 57, 66, 67) }) out += "ice" to "Marznące opady – gołoledź"
         val minT = hrs.minOfOrNull { it.temp } ?: 99.0
-        if (minT <= -15) out += "frost" to "Silny mróz – do ${minT.roundToInt()}°"
-        else if (minT <= 0 && Calendar.getInstance().get(Calendar.MONTH) in 3..5) out += "frost" to "Przymrozek – do ${minT.roundToInt()}°"
+        if (minT <= -15) out += "frost" to "Silny mróz – do ${minT.ri()}°"
+        else if (minT <= 0 && Calendar.getInstance().get(Calendar.MONTH) in 3..5) out += "frost" to "Przymrozek – do ${minT.ri()}°"
         val maxT = listOfNotNull(d0?.max, d1?.max).maxOrNull() ?: 0.0
-        if (maxT >= 30) out += "heat" to "Upał – do ${maxT.roundToInt()}°"
-        if ((d0?.uv ?: 0.0) >= 7) out += "uv" to "Bardzo wysoki indeks UV (${d0!!.uv.roundToInt()})"
+        if (maxT >= 30) out += "heat" to "Upał – do ${maxT.ri()}°"
+        if ((d0?.uv ?: 0.0) >= 7) out += "uv" to "Bardzo wysoki indeks UV (${d0!!.uv.ri()})"
         if (f.aqi > 80) out += "air" to "Zła jakość powietrza (indeks ${f.aqi})"
         return out
     }
@@ -236,8 +239,8 @@ object Weather {
     /** Tekst do odczytania na głos przy budziku. */
     fun speech(f: Forecast): String {
         val d = f.days.firstOrNull()
-        val sb = StringBuilder("Na zewnątrz ${f.temp.roundToInt()} stopni, ${text(f.code).lowercase()}. ")
-        if (d != null) sb.append("Dziś najwyżej ${d.max.roundToInt()} stopni. ")
+        val sb = StringBuilder("Na zewnątrz ${f.temp.ri()} stopni, ${text(f.code).lowercase()}. ")
+        if (d != null) sb.append("Dziś najwyżej ${d.max.ri()} stopni. ")
         if (d != null && d.pop >= 50) sb.append("Weź parasol, szansa opadów ${d.pop} procent. ")
         warnings(f).firstOrNull()?.let { sb.append("Uwaga: ${it.second}.") }
         return sb.toString()

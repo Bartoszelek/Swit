@@ -94,6 +94,12 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------ start
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // zapis każdej awarii – przy następnym uruchomieniu pokazujemy, co się stało
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try { File(filesDir, "crash.txt").writeText(android.util.Log.getStackTraceString(e)) } catch (x: Exception) {}
+            prev?.uncaughtException(t, e)
+        }
         val root = vbox().apply { setBackgroundColor(Color.BLACK) }
         sv = ScrollView(this)
         col = vbox().apply { setPadding(dp(20), dp(16), dp(20), dp(40)) }
@@ -110,9 +116,20 @@ class MainActivity : Activity() {
         if (need.isNotEmpty()) requestPermissions(need.toTypedArray(), 1)
         Notify.schedule(this)
         Alarms.scheduleAll(this)
-        forecast = Weather.cached(this)
+        forecast = try { Weather.cached(this) } catch (e: Exception) { null }
         load(false)
         render()
+        val cf = File(filesDir, "crash.txt")
+        if (cf.exists()) {
+            val txt = cf.readText(); cf.delete()
+            sheet("Ostatnio aplikacja się zamknęła") { c, _ ->
+                c.addView(tv("Zrób zrzut ekranu albo skopiuj i wyślij – naprawię przyczynę.", 13f, color = DIM), lp(top = 6))
+                c.addView(tv(txt.take(1500), 11f).apply { setTextIsSelectable(true) }, lp(top = 8))
+                c.addView(btn("Kopiuj", true) {
+                    getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("błąd", txt)); toast("Skopiowano")
+                }, lp(top = 10))
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -135,7 +152,7 @@ class MainActivity : Activity() {
             val f = try { if (force) Weather.refresh(this) else Weather.fresh(this) } catch (e: Exception) { err = e.message ?: "brak połączenia"; Weather.cached(this) }
             h.post {
                 loading = false; forecast = f
-                Widgets.updateAll(this); Notify.statusTemp(this, f)
+                try { Widgets.updateAll(this); Notify.statusTemp(this, f) } catch (e: Exception) {}
                 if (tab == "weather") render()
             }
         }.start()
@@ -156,11 +173,16 @@ class MainActivity : Activity() {
         h.removeCallbacks(tick)
         col.removeAllViews()
         drawTabs()
-        when (tab) {
-            "alarms" -> renderAlarms()
-            "timer" -> renderTimer()
-            "settings" -> renderSettings()
-            else -> renderWeather()
+        try {
+            when (tab) {
+                "alarms" -> renderAlarms()
+                "timer" -> renderTimer()
+                "settings" -> renderSettings()
+                else -> renderWeather()
+            }
+        } catch (e: Exception) {
+            col.addView(tv("Coś poszło nie tak przy wyświetlaniu tej karty:", 15f, true), lp(top = 16))
+            col.addView(tv(android.util.Log.getStackTraceString(e).take(1200), 11f, color = DIM).apply { setTextIsSelectable(true) }, lp(top = 6))
         }
     }
 
@@ -215,7 +237,7 @@ class MainActivity : Activity() {
             c.addView(icon(Weather.icon(x.code, x.day), 28), LinearLayout.LayoutParams(dp(28), dp(28)).apply { topMargin = dp(4) })
             c.addView(tv(Weather.deg(x.temp), 15f, true))
             c.addView(tv(if (x.pop >= 10) "${x.pop}%" else " ", 11f, color = DIM))
-            c.addView(tv("${x.wind.roundToInt()} km/h", 10f, color = DIM))
+            c.addView(tv("${x.wind.ri()} km/h", 10f, color = DIM))
             hr.addView(c)
         }
         col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(hr) }, lp(top = 4))
@@ -223,8 +245,9 @@ class MainActivity : Activity() {
         // 16 dni
         header("Prognoza na ${f.days.size} dni")
         val dn = SimpleDateFormat("EEE d.MM", Locale("pl"))
-        val gMin = f.days.minOf { it.min }; val gMax = f.days.maxOf { it.max }
-        for ((i, d) in f.days.withIndex()) {
+        val okDays = f.days.filter { !it.min.isNaN() && !it.max.isNaN() }
+        val gMin = okDays.minOfOrNull { it.min } ?: 0.0; val gMax = okDays.maxOfOrNull { it.max } ?: 1.0
+        for ((i, d) in okDays.withIndex()) {
             val r = hbox().apply { setPadding(0, dp(8), 0, dp(8)) }
             r.addView(tv(if (i == 0) "Dziś" else if (i == 1) "Jutro" else dn.format(Date(d.t)), 14f), lp(dp(78), -2))
             r.addView(icon(Weather.icon(d.code), 26))
@@ -248,9 +271,9 @@ class MainActivity : Activity() {
         val d0 = f.days.firstOrNull()
         val sun = SimpleDateFormat("H:mm", Locale("pl"))
         val grid = listOf(
-            "Wiatr" to "${f.wind.roundToInt()} km/h ${Weather.windDir(f.windDir)}", "Porywy" to "${f.gusts.roundToInt()} km/h",
-            "Wilgotność" to "${f.humidity}%", "Ciśnienie" to "${f.pressure.roundToInt()} hPa",
-            "Zachmurzenie" to "${f.clouds}%", "Indeks UV" to (d0?.uv?.roundToInt()?.toString() ?: "—"),
+            "Wiatr" to "${f.wind.ri()} km/h ${Weather.windDir(f.windDir)}", "Porywy" to "${f.gusts.ri()} km/h",
+            "Wilgotność" to "${f.humidity}%", "Ciśnienie" to "${f.pressure.ri()} hPa",
+            "Zachmurzenie" to "${f.clouds}%", "Indeks UV" to (d0?.uv?.ri()?.toString() ?: "—"),
             "Wschód" to (d0?.let { sun.format(Date(it.sunrise)) } ?: "—"), "Zachód" to (d0?.let { sun.format(Date(it.sunset)) } ?: "—"))
         for (pair in grid.chunked(2)) {
             val r = hbox()
@@ -264,7 +287,7 @@ class MainActivity : Activity() {
 
         header("Powietrze i pyłki")
         col.addView(tv("Jakość powietrza: ${Weather.aqiText(f.aqi)}" + (if (f.aqi >= 0) " (indeks ${f.aqi})" else ""), 15f, true), lp(top = 4))
-        if (f.pm25 >= 0) col.addView(tv("PM2,5: ${f.pm25.roundToInt()} µg/m³ · PM10: ${f.pm10.roundToInt()} µg/m³", 13f, color = DIM))
+        if (f.pm25 >= 0) col.addView(tv("PM2,5: ${f.pm25.ri()} µg/m³ · PM10: ${f.pm10.ri()} µg/m³", 13f, color = DIM))
         for ((n, v) in f.pollen) col.addView(tv("$n: ${Weather.pollenText(v)}", 14f), lp(top = 2))
 
         header("Radar opadów")
@@ -279,8 +302,8 @@ class MainActivity : Activity() {
             c.addView(tv(Weather.text(d.code), 17f), lp(top = 8))
             c.addView(tv("Od ${Weather.deg(d.min)} do ${Weather.deg(d.max)}", 15f), lp(top = 6))
             c.addView(tv("Opady: ${"%.1f".format(d.rain)} mm (szansa ${d.pop}%)", 15f), lp(top = 4))
-            c.addView(tv("Porywy wiatru: ${d.gusts.roundToInt()} km/h", 15f), lp(top = 4))
-            c.addView(tv("Indeks UV: ${d.uv.roundToInt()}", 15f), lp(top = 4))
+            c.addView(tv("Porywy wiatru: ${d.gusts.ri()} km/h", 15f), lp(top = 4))
+            c.addView(tv("Indeks UV: ${d.uv.ri()}", 15f), lp(top = 4))
             c.addView(tv("Wschód ${sun.format(Date(d.sunrise))} · zachód ${sun.format(Date(d.sunset))}", 15f), lp(top = 4))
         }
     }

@@ -174,7 +174,7 @@ object Notify {
         if (!p(c).getBoolean("nTemp", false) || f == null) { nm(c).cancel(7500); return }
         channels(c)
         val bmp = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
-        val txt = f.temp.roundToInt().toString() + "°"
+        val txt = f.temp.ri().toString() + "°"
         val pnt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; typeface = Typeface.DEFAULT_BOLD; textAlign = Paint.Align.CENTER; textSize = if (txt.length > 3) 52f else 64f }
         Canvas(bmp).drawText(txt, 48f, 48f - (pnt.descent() + pnt.ascent()) / 2, pnt)
         post(c, 7500, Notification.Builder(c, "temp").setSmallIcon(Icon.createWithBitmap(bmp)).setOngoing(true).setShowWhen(false)
