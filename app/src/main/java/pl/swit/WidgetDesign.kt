@@ -155,8 +155,12 @@ object WD {
         val f = Weather.cached(c)
         val fg = fg(c, d)
         val onLight = Color.red(fg) < 100
-        val k = d.scale / 100f
         val freeMode = d.free && Build.VERSION.SDK_INT >= 31
+        // samodzielne dopasowanie: jeśli elementy nie mieszczą się w widżecie, wszystko proporcjonalnie maleje
+        val fit = if (freeMode || wDp <= 0 || hDp <= 0) 1f else fitFactor(c, d, f, wDp, hDp)
+        val k = d.scale / 100f * fit
+        val clockSize = d.clock * fit
+        val iconDp = (d.icon * fit).toInt().coerceAtLeast(14)
         val rv = RemoteViews(c.packageName, if (freeMode) R.layout.wg_free else R.layout.wg_custom)
         rv.setOnClickPendingIntent(R.id.w_root, open(c, "weather"))
         // tło
@@ -187,7 +191,7 @@ object WD {
             block.addView(R.id.r_block, v)
         }
         fun clockStyle(v: RemoteViews) {
-            v.setTextColor(R.id.r_clock, fg); v.setTextViewTextSize(R.id.r_clock, TypedValue.COMPLEX_UNIT_SP, d.clock * ks)
+            v.setTextColor(R.id.r_clock, fg); v.setTextViewTextSize(R.id.r_clock, TypedValue.COMPLEX_UNIT_SP, clockSize * ks)
             if (d.seconds) { v.setCharSequence(R.id.r_clock, "setFormat24Hour", "H:mm:ss"); v.setCharSequence(R.id.r_clock, "setFormat12Hour", "h:mm:ss") }
             v.setOnClickPendingIntent(R.id.r_clock, open(c, "alarms"))
         }
@@ -204,9 +208,9 @@ object WD {
             "date" -> { val v = RemoteViews(c.packageName, L(R.layout.wr_date, R.layout.wr_date_ns)); v.setTextColor(R.id.r_date, fg); v.setTextViewTextSize(R.id.r_date, TypedValue.COMPLEX_UNIT_SP, 14f * k); block.addView(R.id.r_block, v) }
             "clockwx" -> {
                 val v = RemoteViews(c.packageName, L(R.layout.wr_clockwx, R.layout.wr_clockwx_ns)); clockStyle(v)
-                if (f != null) { v.setImageViewBitmap(R.id.r_icon, Art.icon(f.code, f.day, 180, onLight)); txt(v, R.id.r_temp, Weather.deg(f.temp), d.clock * 0.7f / k) }
-                else txt(v, R.id.r_temp, "--°", d.clock * 0.7f / k)
-                iconSize(v, R.id.r_icon, d.icon)
+                if (f != null) { v.setImageViewBitmap(R.id.r_icon, Art.icon(f.code, f.day, 180, onLight)); txt(v, R.id.r_temp, Weather.deg(f.temp), clockSize * 0.7f / k) }
+                else txt(v, R.id.r_temp, "--°", clockSize * 0.7f / k)
+                iconSize(v, R.id.r_icon, iconDp)
                 v.setOnClickPendingIntent(R.id.r_icon, open(c, "weather")); v.setOnClickPendingIntent(R.id.r_temp, open(c, "weather"))
                 block.addView(R.id.r_block, v)
             }
@@ -216,7 +220,7 @@ object WD {
                     v.setImageViewBitmap(R.id.r_icon, Art.icon(f.code, f.day, 160, onLight))
                     txt(v, R.id.r_temp, Weather.deg(f.temp), 30f); txt(v, R.id.r_desc, Weather.text(f.code), 14f)
                 } else { txt(v, R.id.r_temp, "--°", 30f); txt(v, R.id.r_desc, "Otwórz Świt", 14f) }
-                iconSize(v, R.id.r_icon, d.icon)
+                iconSize(v, R.id.r_icon, iconDp)
                 v.setOnClickPendingIntent(R.id.r_row, open(c, "weather"))
                 block.addView(R.id.r_block, v)
             }
@@ -276,6 +280,33 @@ object WD {
         } else rv.addView(R.id.w_body, block)
         }
         return rv
+    }
+
+    /** Szacuje wysokość i szerokość treści (dp) i zwraca współczynnik zmniejszenia, żeby nic nie było ucięte. */
+    private fun fitFactor(c: Context, d: Design, f: Forecast?, wDp: Int, hDp: Int): Float {
+        val fs = c.resources.configuration.fontScale
+        val k = d.scale / 100f
+        fun line(n: Int = 1) = 13f * k * fs * 1.45f * n
+        var h = 2f * d.pad
+        var w = 0f
+        val clockW = d.clock * fs * 0.58f * (if (d.seconds) 8 else 5)
+        for (key in d.shown) h += when (key) {
+            "clock" -> { w = maxOf(w, clockW); d.clock * fs * 1.2f }
+            "date" -> 14f * k * fs * 1.45f
+            "clockwx" -> { w = maxOf(w, clockW + d.icon + d.clock * 0.7f * fs * 0.58f * 3 + 12); maxOf(d.clock * fs * 1.2f, d.icon.toFloat()) }
+            "now" -> { w = maxOf(w, d.icon + 30f * k * fs * 1.9f + 110f * k * fs); maxOf(d.icon.toFloat(), 30f * k * fs * 1.25f) }
+            "warn" -> if (f != null) line(Weather.warnings(f).size.coerceAtMost(2)) else 0f
+            "alarms" -> line(Alarms.all(c).count { it.on }.coerceIn(1, 4))
+            "events" -> line(d.events.coerceIn(1, 8))
+            "hours", "days" -> (11f + 13f) * k * fs * 1.35f + 26f + 12f
+            "nap" -> 38f
+            "rain" -> if (f != null && (Weather.nowcast(f).let { it.startsWith("Za ok.") || it.startsWith("Pada") || it.startsWith("Przestanie") } || (f.days.firstOrNull()?.pop ?: 0) >= 20)) line() else 0f
+            "bed" -> if (Rem.bedtime(c) != null) line() else 0f
+            else -> line()
+        }
+        val fh = hDp / h
+        val fw = if (w > 0) (wDp - 2f * d.pad) / w else 1f
+        return minOf(1f, fh, fw).coerceAtLeast(0.3f)
     }
 
     private fun dayWord(t: Long): String {
