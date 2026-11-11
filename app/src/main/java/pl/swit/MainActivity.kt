@@ -587,18 +587,76 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Szybki alarm: za X minut. */
+    /** Szybki alarm jak w Alarm Clock Xtreme: wpisujesz godziny i minuty z klawiatury, widać, o której zadzwoni. */
     private fun quickSheet() {
-        sheet("Szybki alarm") { c, d ->
-            c.addView(tv("Zadzwoni za:", 14f, color = DIM), lp(top = 6))
-            for (row in listOf(listOf(5, 10, 15, 20), listOf(30, 45, 60, 90), listOf(120, 180, 240, 480))) {
-                val r = hbox()
-                for (m in row) r.addView(btn(if (m < 60) "$m min" else "${m / 60} h" + if (m % 60 > 0) " ${m % 60}" else "") {
-                    d.dismiss(); Alarms.nap(this, m); toast("Alarm za $m min"); render()
-                }, lp(0, -2, 1f).apply { setMargins(dp(3), dp(4), dp(3), dp(4)) })
-                c.addView(r)
-            }
+        val d = Dialog(this, android.R.style.Theme_Material_NoActionBar)
+        var digits = ""                                   // do 4 cyfr: GGMM, wpisywane od prawej
+        fun hours() = digits.padStart(4, '0').take(2).toInt()
+        fun mins() = digits.padStart(4, '0').takeLast(2).toInt()
+        fun total() = hours() * 60 + mins()
+        val panel = vbox().apply { setBackgroundColor(Theme.blend(SURF, Theme.accent, 0.08f)); setPadding(dp(18), dp(14), dp(18), dp(18)) }
+        val top = hbox()
+        top.addView(tv("✕", 26f).apply { setPadding(dp(6), 0, dp(6), 0); setOnClickListener { d.dismiss() } })
+        top.addView(View(this), lp(0, 1, 1f))
+        panel.addView(top)
+        // wyświetlacz: 00 godz. 00 min
+        val disp = hbox().apply { gravity = Gravity.CENTER or Gravity.BOTTOM }
+        val hT = tv("00", 64f, true); val mT = tv("00", 64f, true)
+        disp.addView(hT); disp.addView(tv(" godz.  ", 22f, color = DIM).apply { setPadding(0, 0, 0, dp(10)) })
+        disp.addView(mT); disp.addView(tv(" min", 22f, color = DIM).apply { setPadding(0, 0, 0, dp(10)) })
+        panel.addView(disp, lp(top = 6))
+        val whenT = tv("", 20f, color = DIM).apply { gravity = Gravity.CENTER }
+        panel.addView(whenT, lp(top = 4))
+        val set = tv("USTAW SZYBKI ALARM", 16f, true).apply { gravity = Gravity.CENTER; letterSpacing = 0.06f; setPadding(0, dp(16), 0, dp(16)) }
+        fun refresh() {
+            val empty = digits.isEmpty() || total() == 0
+            hT.text = "%02d".format(hours()); mT.text = "%02d".format(mins())
+            hT.setTextColor(if (empty) DIM else FG); mT.setTextColor(if (empty) DIM else FG)
+            val t = System.currentTimeMillis() + total() * 60_000L
+            val cal = Calendar.getInstance().apply { timeInMillis = t }
+            val day = when (dayKey(t) - dayKey(System.currentTimeMillis())) { 0 -> "Dzisiaj"; 1 -> "Jutro"; else -> SimpleDateFormat("EEEE", Locale("pl")).format(Date(t)).replaceFirstChar { it.uppercase() } }
+            whenT.text = "$day, %d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+            set.setTextColor(if (empty) DIM else Theme.onAccent)
+            set.background = if (empty) round(Theme.withAlpha(FG, 0.12f), 14) else Theme.gradient(dp(14).toFloat())
         }
+        // klawiatura
+        fun key(label: String, f: () -> Unit) = tv(label, 32f, true).apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(12))
+            background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(Theme.withAlpha(FG, 0.15f)), null, android.graphics.drawable.ColorDrawable(Color.WHITE))
+            setOnClickListener { f(); refresh() }
+        }
+        fun add(x: String) { digits = (digits + x).trimStart('0').takeLast(4) }
+        for (row in listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("00", "0", "⌫"))) {
+            val r = hbox()
+            for (k in row) r.addView(key(k) {
+                when (k) { "⌫" -> digits = digits.dropLast(1); "00" -> if (digits.isNotEmpty()) add("00"); else -> add(k) }
+            }.apply { if (k == "⌫") setOnLongClickListener { digits = ""; refresh(); true } }, lp(0, -2, 1f))
+            panel.addView(r, lp(top = 2))
+        }
+        // szybkie wybory
+        val qr = hbox()
+        for ((m, n) in listOf(30 to "30 min", 120 to "2 godz.", 480 to "8 godz.")) qr.addView(tv(n, 16f, true).apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(12)); background = round(Theme.withAlpha(FG, 0.12f), 12)
+            setOnClickListener { digits = "%d%02d".format(m / 60, m % 60).trimStart('0'); refresh() }
+        }, lp(0, -2, 1f).apply { setMargins(dp(4), 0, dp(4), 0) })
+        panel.addView(qr, lp(top = 12))
+        set.setOnClickListener {
+            val m = total(); if (m <= 0) return@setOnClickListener
+            Alarms.nap(this, m); d.dismiss()
+            toast("Zadzwoni o " + whenT.text.toString().substringAfter(", ")); render()
+        }
+        panel.addView(set, lp(top = 12))
+        refresh()
+        d.setContentView(panel)
+        d.window?.apply {
+            setLayout(-1, -2); setGravity(Gravity.BOTTOM)
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setDimAmount(0.55f); addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        }
+        // „Dzisiaj, 13:19” odświeżane co pół minuty, gdy okno jest otwarte
+        val tick = object : Runnable { override fun run() { if (d.isShowing) { refresh(); h.postDelayed(this, 30_000) } } }
+        d.setOnShowListener { h.postDelayed(tick, 30_000) }
+        d.show()
     }
 
     /** Pora snu: ile chcesz spać i kiedy przypomnieć. */
