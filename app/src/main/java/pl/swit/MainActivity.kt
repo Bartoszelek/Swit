@@ -42,14 +42,23 @@ class MainActivity : Activity() {
     private lateinit var col: LinearLayout
     private lateinit var tabs: LinearLayout
     private var tab = "weather"
+    private lateinit var root: LinearLayout
+
+    private fun applyTheme() {
+        Theme.apply(this, pr().getString("theme", "ocean") ?: "ocean", pr().getString("mode", "system") ?: "system")
+        window.statusBarColor = Theme.bg; window.navigationBarColor = Theme.surface
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = if (Theme.dark) 0 else (View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR)
+    }
     private var forecast: Forecast? = null
     private var loading = false
     private var err = ""
 
-    private val FG = Color.WHITE
-    private val DIM = 0xFF9A9A9E.toInt()
-    private val SURF = 0xFF1A1A1A.toInt()
-    private val LINE = 0xFF2C2C2E.toInt()
+    private val FG get() = Theme.fg
+    private val DIM get() = Theme.dim
+    private val SURF get() = Theme.surface
+    private val LINE get() = Theme.line
+    private val BG get() = Theme.bg
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun tv(t: String, size: Float = 15f, bold: Boolean = false, color: Int = FG) = TextView(this).apply {
@@ -61,12 +70,15 @@ class MainActivity : Activity() {
     private fun vbox() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     private fun btn(t: String, primary: Boolean = false, f: () -> Unit) = TextView(this).apply {
         text = t; textSize = 15f; gravity = Gravity.CENTER
-        setTextColor(if (primary) Color.BLACK else FG); background = if (primary) round(FG, 24) else round(SURF, 24, 1)
+        setTextColor(if (primary) Theme.onAccent else FG); background = if (primary) Theme.gradient(dp(24).toFloat()) else round(SURF, 24, 1)
         setPadding(dp(18), dp(11), dp(18), dp(11)); setOnClickListener { f() }
     }
     private fun header(t: String) = col.addView(tv(t.uppercase(), 13f, true, DIM).apply { letterSpacing = 0.08f }, lp(top = 24))
     private fun line() = View(this).apply { setBackgroundColor(LINE) }
-    private fun icon(res: Int, size: Int) = ImageView(this).apply { setImageResource(res) }.also { it.layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)) }
+    private fun icon(res: Int, size: Int) = ImageView(this).apply { setImageResource(res); setColorFilter(Theme.fg) }.also { it.layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)) }
+
+    /** Kolorowa ikona pogody. */
+    private fun wicon(code: Int, day: Boolean, size: Int) = ImageView(this).apply { setImageBitmap(Art.icon(code, day, dp(size))) }.also { it.layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)) }
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
     private fun pr() = Prefs.get(this)
 
@@ -94,13 +106,15 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------ start
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyTheme()
         // zapis każdej awarii – przy następnym uruchomieniu pokazujemy, co się stało
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             try { File(filesDir, "crash.txt").writeText(android.util.Log.getStackTraceString(e)) } catch (x: Exception) {}
             prev?.uncaughtException(t, e)
         }
-        val root = vbox().apply { setBackgroundColor(Color.BLACK) }
+        root = vbox().apply { setBackgroundColor(BG) }
+        val root = this.root
         sv = ScrollView(this)
         col = vbox().apply { setPadding(dp(20), dp(16), dp(20), dp(40)) }
         sv.addView(col)
@@ -162,8 +176,8 @@ class MainActivity : Activity() {
         tabs.removeAllViews()
         for ((k, n) in listOf("weather" to "Pogoda", "alarms" to "Budziki", "timer" to "Minutnik", "settings" to "Ustawienia")) {
             val on = k == tab
-            tabs.addView(tv(n, 13f, on, if (on) Color.BLACK else DIM).apply {
-                gravity = Gravity.CENTER; background = if (on) round(FG, 18) else null; setPadding(0, dp(10), 0, dp(10))
+            tabs.addView(tv(n, 13f, on, if (on) Theme.onAccent else DIM).apply {
+                gravity = Gravity.CENTER; background = if (on) Theme.gradient(dp(18).toFloat()) else null; setPadding(0, dp(10), 0, dp(10))
                 setOnClickListener { tab = k; render(); sv.scrollTo(0, 0) }
             }, lp(0, -2, 1f).apply { leftMargin = dp(3); rightMargin = dp(3) })
         }
@@ -171,6 +185,7 @@ class MainActivity : Activity() {
 
     private fun render() {
         h.removeCallbacks(tick)
+        root.setBackgroundColor(BG); tabs.setBackgroundColor(SURF)
         col.removeAllViews()
         drawTabs()
         try {
@@ -201,15 +216,23 @@ class MainActivity : Activity() {
         }
         val df = SimpleDateFormat("HH:mm", Locale("pl"))
         col.addView(tv("Aktualizacja ${df.format(Date(f.at))}" + if (err.isNotEmpty()) " · offline" else "", 11f, color = DIM))
-        // teraz
-        val nowR = hbox().apply { setPadding(0, dp(14), 0, 0) }
-        nowR.addView(icon(Weather.icon(f.code, f.day), 84))
-        val nl = vbox()
-        nl.addView(tv(Weather.deg(f.temp), 64f, true))
-        nl.addView(tv(Weather.text(f.code), 17f))
-        nl.addView(tv("Odczuwalna ${Weather.deg(f.feels)}", 13f, color = DIM))
-        nowR.addView(nl, lp(0, -2, 1f).apply { leftMargin = dp(16) })
-        col.addView(nowR)
+        // teraz – animowane niebo
+        val hero = android.widget.FrameLayout(this).apply { clipToOutline = true; background = round(SURF, 28) }
+        hero.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) { o.setRoundRect(0, 0, v.width, v.height, dp(28).toFloat()) }
+        }
+        hero.addView(SkyView(this).apply { phase = Art.phase(f); scene = Art.scene(f.code) }, android.widget.FrameLayout.LayoutParams(-1, -1))
+        val hc = vbox().apply { setPadding(dp(20), dp(18), dp(20), dp(18)) }
+        val nowR = hbox()
+        val tl = vbox()
+        tl.addView(tv(Weather.deg(f.temp), 72f, true, Color.WHITE).apply { setShadowLayer(12f, 0f, 2f, 0x66000000) })
+        tl.addView(tv(Weather.text(f.code), 18f, true, Color.WHITE).apply { setShadowLayer(8f, 0f, 1f, 0x66000000) })
+        tl.addView(tv("Odczuwalna ${Weather.deg(f.feels)}" + (f.days.firstOrNull()?.let { " · ↑${Weather.deg(it.max)} ↓${Weather.deg(it.min)}" } ?: ""), 14f, color = 0xEEFFFFFF.toInt()).apply { setShadowLayer(6f, 0f, 1f, 0x66000000) })
+        nowR.addView(tl, lp(0, -2, 1f))
+        nowR.addView(wicon(f.code, f.day, 96))
+        hc.addView(nowR)
+        hero.addView(hc)
+        col.addView(hero, lp(-1, dp(230), top = 12))
         val nc = Weather.nowcast(f)
         if (nc.isNotEmpty()) col.addView(tv("☂ $nc", 15f, true), lp(top = 10))
         for ((_, w) in Weather.warnings(f)) col.addView(tv("⚠ $w", 14f, true, 0xFFFFB020.toInt()), lp(top = 6))
@@ -220,7 +243,7 @@ class MainActivity : Activity() {
             header("Opady – najbliższe 3 godziny")
             val bars = hbox().apply { gravity = Gravity.BOTTOM }
             val mx = q.maxOf { it.second }.coerceAtLeast(0.5)
-            for ((_, mm) in q) bars.addView(View(this).apply { background = round(FG, 3) }, LinearLayout.LayoutParams(0, dp((4 + 56 * mm / mx).toInt()), 1f).apply { leftMargin = dp(2); rightMargin = dp(2) })
+            for ((_, mm) in q) bars.addView(View(this).apply { background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFF4FA8FF.toInt(), 0xFF2A6FD6.toInt())).apply { cornerRadius = dp(3).toFloat() } }, LinearLayout.LayoutParams(0, dp((4 + 56 * mm / mx).toInt()), 1f).apply { leftMargin = dp(2); rightMargin = dp(2) })
             col.addView(bars, lp(-1, dp(64), top = 6))
             val lbl = hbox()
             lbl.addView(tv("teraz", 11f, color = DIM), lp(0, -2, 1f)); lbl.addView(tv("+3 h", 11f, color = DIM))
@@ -232,13 +255,13 @@ class MainActivity : Activity() {
         val hr = hbox()
         val hf = SimpleDateFormat("H:mm", Locale("pl"))
         for (x in f.hours.take(48)) {
-            val c = vbox().apply { gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+            val c = vbox().apply { gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(10), dp(10), dp(10), dp(10)); background = round(SURF, 18) }
             c.addView(tv(hf.format(Date(x.t)), 12f, color = DIM))
-            c.addView(icon(Weather.icon(x.code, x.day), 28), LinearLayout.LayoutParams(dp(28), dp(28)).apply { topMargin = dp(4) })
+            c.addView(wicon(x.code, x.day, 32), LinearLayout.LayoutParams(dp(32), dp(32)).apply { topMargin = dp(4) })
             c.addView(tv(Weather.deg(x.temp), 15f, true))
             c.addView(tv(if (x.pop >= 10) "${x.pop}%" else " ", 11f, color = DIM))
             c.addView(tv("${x.wind.ri()} km/h", 10f, color = DIM))
-            hr.addView(c)
+            hr.addView(c, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(8) })
         }
         col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(hr) }, lp(top = 4))
 
@@ -250,14 +273,15 @@ class MainActivity : Activity() {
         for ((i, d) in okDays.withIndex()) {
             val r = hbox().apply { setPadding(0, dp(8), 0, dp(8)) }
             r.addView(tv(if (i == 0) "Dziś" else if (i == 1) "Jutro" else dn.format(Date(d.t)), 14f), lp(dp(78), -2))
-            r.addView(icon(Weather.icon(d.code), 26))
+            r.addView(wicon(d.code, true, 30))
             r.addView(tv(if (d.pop >= 20) "${d.pop}%" else "", 11f, color = DIM).apply { gravity = Gravity.CENTER }, lp(dp(36), -2))
             r.addView(tv(Weather.deg(d.min), 14f, color = DIM).apply { gravity = Gravity.END }, lp(dp(36), -2))
             // pasek zakresu temperatur
             val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; background = round(LINE, 3) }
             val span = (gMax - gMin).coerceAtLeast(1.0)
             bar.addView(View(this), LinearLayout.LayoutParams(0, dp(5), (d.min - gMin).toFloat().coerceAtLeast(0.01f)))
-            bar.addView(View(this).apply { background = round(FG, 3) }, LinearLayout.LayoutParams(0, dp(5), (d.max - d.min).toFloat().coerceAtLeast(0.3f)))
+            bar.addView(View(this).apply { background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF5AB0FF.toInt(), 0xFFFFB347.toInt())).apply { cornerRadius = dp(3).toFloat() } },
+                LinearLayout.LayoutParams(0, dp(5), (d.max - d.min).toFloat().coerceAtLeast(0.3f)))
             bar.addView(View(this), LinearLayout.LayoutParams(0, dp(5), (gMax - d.max).toFloat().coerceAtLeast(0.01f)))
             r.addView(bar, lp(0, dp(5), 1f).apply { leftMargin = dp(8); rightMargin = dp(8) })
             r.addView(tv(Weather.deg(d.max), 14f, true), lp(dp(36), -2))
@@ -333,7 +357,7 @@ class MainActivity : Activity() {
                 } })
                 c.addView(r)
             }
-            val e = EditText(this).apply { hint = "Szukaj miejscowości"; setTextColor(FG); setHintTextColor(DIM); setSingleLine(); background = round(Color.BLACK, 14); setPadding(dp(12), dp(10), dp(12), dp(10)) }
+            val e = EditText(this).apply { hint = "Szukaj miejscowości"; setTextColor(FG); setHintTextColor(DIM); setSingleLine(); background = round(BG, 14); setPadding(dp(12), dp(10), dp(12), dp(10)) }
             c.addView(e, lp(top = 12))
             val res = vbox()
             c.addView(btn("Szukaj", true) {
@@ -375,7 +399,11 @@ class MainActivity : Activity() {
         col.addView(btn("＋ Nowy budzik", true) { edit(Alarm(0, 7, 0, 0x1f)) }, lp(top = 12))
         val df = SimpleDateFormat("EEE d.MM HH:mm", Locale("pl"))
         for (a in Alarms.all(this)) {
-            val box = vbox().apply { background = round(SURF, 18); setPadding(dp(16), dp(12), dp(14), dp(12)) }
+            val box = vbox().apply {
+                background = if (a.on) GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Theme.blend(SURF, Theme.accent, 0.22f), Theme.blend(SURF, Theme.accent2, 0.12f))).apply { cornerRadius = dp(20).toFloat() }
+                else round(SURF, 20)
+                setPadding(dp(16), dp(12), dp(14), dp(12))
+            }
             val r = hbox()
             val l = vbox()
             l.addView(tv(a.time(), 40f, true, if (a.on) FG else DIM))
@@ -407,15 +435,15 @@ class MainActivity : Activity() {
                 dr.removeAllViews()
                 for (i in 0..6) {
                     val on = a.days and (1 shl i) != 0
-                    dr.addView(tv(names[i], 14f, on, if (on) Color.BLACK else FG).apply {
-                        gravity = Gravity.CENTER; background = if (on) round(FG, 16) else round(Color.BLACK, 16, 1); setPadding(0, dp(8), 0, dp(8))
+                    dr.addView(tv(names[i], 14f, on, if (on) Theme.onAccent else FG).apply {
+                        gravity = Gravity.CENTER; background = if (on) Theme.gradient(dp(16).toFloat()) else round(BG, 16, 1); setPadding(0, dp(8), 0, dp(8))
                         setOnClickListener { a.days = a.days xor (1 shl i); drawDays() }
                     }, lp(0, -2, 1f).apply { rightMargin = dp(4) })
                 }
             }
             drawDays()
             c.addView(dr, lp(top = 8))
-            val lbl = EditText(this).apply { setText(a.label); hint = "Nazwa (np. Praca)"; setTextColor(FG); setHintTextColor(DIM); setSingleLine(); background = round(Color.BLACK, 14); setPadding(dp(12), dp(10), dp(12), dp(10)) }
+            val lbl = EditText(this).apply { setText(a.label); hint = "Nazwa (np. Praca)"; setTextColor(FG); setHintTextColor(DIM); setSingleLine(); background = round(BG, 14); setPadding(dp(12), dp(10), dp(12), dp(10)) }
             c.addView(lbl, lp(top = 10))
 
             fun choice(title: String, opts: List<Pair<String, String>>, cur: String, set: (String) -> Unit) {
@@ -423,12 +451,12 @@ class MainActivity : Activity() {
                 val r = hbox()
                 val views = ArrayList<TextView>()
                 for ((k, n) in opts) {
-                    val v = tv(n, 13f, k == cur, if (k == cur) Color.BLACK else FG).apply {
-                        background = if (k == cur) round(FG, 14) else round(Color.BLACK, 14, 1); setPadding(dp(12), dp(7), dp(12), dp(7))
+                    val v = tv(n, 13f, k == cur, if (k == cur) Theme.onAccent else FG).apply {
+                        background = if (k == cur) Theme.gradient(dp(14).toFloat()) else round(BG, 14, 1); setPadding(dp(12), dp(7), dp(12), dp(7))
                     }
                     v.setOnClickListener {
                         set(k)
-                        for ((j, x) in views.withIndex()) { val sel = opts[j].first == k; x.setTextColor(if (sel) Color.BLACK else FG); x.background = if (sel) round(FG, 14) else round(Color.BLACK, 14, 1) }
+                        for ((j, x) in views.withIndex()) { val sel = opts[j].first == k; x.setTextColor(if (sel) Theme.onAccent else FG); x.background = if (sel) Theme.gradient(dp(14).toFloat()) else round(BG, 14, 1) }
                     }
                     views += v
                     r.addView(v, lp(-2, -2).apply { rightMargin = dp(6) })
@@ -503,6 +531,7 @@ class MainActivity : Activity() {
     private var swAcc = 0L
     private val laps = ArrayList<Long>()
     private var timerLabel: TextView? = null
+    private var timerRing: ProgressRing? = null
     private var swLabel: TextView? = null
     private var timerSet = 5 * 60
 
@@ -510,6 +539,7 @@ class MainActivity : Activity() {
         override fun run() {
             val end = pr().getLong("timerEnd", 0)
             timerLabel?.text = if (end > System.currentTimeMillis()) fmt((end - System.currentTimeMillis()) / 1000) else fmt(timerSet.toLong())
+            if (end > System.currentTimeMillis()) timerRing?.let { r -> val v = (end - System.currentTimeMillis()) / 1000f / pr().getInt("timerTotal", timerSet).coerceAtLeast(1); r.big = ""; r.invalidate(); if (Math.abs(r.value - v) > 0.02f) r.value = v }
             swLabel?.text = swFmt(swAcc + if (swStart > 0) System.currentTimeMillis() - swStart else 0)
             h.postDelayed(this, 100)
         }
@@ -522,9 +552,16 @@ class MainActivity : Activity() {
         col.addView(tv("Minutnik", 32f, true))
         val end = pr().getLong("timerEnd", 0)
         val running = end > System.currentTimeMillis()
-        val tl = tv(fmt(if (running) (end - System.currentTimeMillis()) / 1000 else timerSet.toLong()), 64f, true).apply { gravity = Gravity.CENTER }
+        val tl = tv(fmt(if (running) (end - System.currentTimeMillis()) / 1000 else timerSet.toLong()), 56f, true).apply { gravity = Gravity.CENTER }
         timerLabel = tl
-        col.addView(tl, lp(top = 10))
+        val ringBox = android.widget.FrameLayout(this)
+        val ring = ProgressRing(this)
+        timerRing = ring
+        ringBox.addView(ring, android.widget.FrameLayout.LayoutParams(-1, -1))
+        ringBox.addView(tl, android.widget.FrameLayout.LayoutParams(-1, -1).apply { gravity = Gravity.CENTER })
+        tl.gravity = Gravity.CENTER
+        col.addView(ringBox, lp(-1, dp(260), top = 10))
+        ring.value = if (running) ((end - System.currentTimeMillis()) / 1000f / pr().getInt("timerTotal", timerSet).coerceAtLeast(1)) else 1f
         if (!running) {
             val r = hbox()
             for ((s, n) in listOf(60 to "1 min", 180 to "3 min", 300 to "5 min", 600 to "10 min", 900 to "15 min", 1800 to "30 min", 3600 to "1 h"))
@@ -533,7 +570,7 @@ class MainActivity : Activity() {
             val adj = hbox()
             for ((d, n) in listOf(-60 to "−1 min", -10 to "−10 s", 10 to "+10 s", 60 to "+1 min")) adj.addView(btn(n) { timerSet = (timerSet + d).coerceAtLeast(10); render() }, lp(0, -2, 1f).apply { rightMargin = dp(6) })
             col.addView(adj, lp(top = 8))
-            col.addView(btn("Start", true) { Alarms.startTimer(this, timerSet); render() }, lp(top = 10))
+            col.addView(btn("Start", true) { pr().edit().putInt("timerTotal", timerSet).apply(); Alarms.startTimer(this, timerSet); render() }, lp(top = 10))
         } else col.addView(btn("Zatrzymaj") { Alarms.stopTimer(this); render() }, lp(top = 10))
 
         header("Stoper")
@@ -568,8 +605,32 @@ class MainActivity : Activity() {
         toggle("Wieczorem prognoza na jutro", "O 20:00", pr().getBoolean("nEvening", false)) { pr().edit().putBoolean("nEvening", it).apply() }
         toggle("Temperatura na pasku stanu", "Stała ikona z aktualną temperaturą", pr().getBoolean("nTemp", false)) { pr().edit().putBoolean("nTemp", it).apply(); Notify.statusTemp(this, forecast) }
 
+        header("Wygląd")
+        col.addView(tv("Motyw", 14f, color = DIM), lp(top = 4))
+        val tr = hbox()
+        for (pz in Theme.PRESETS) {
+            val (c1, c2) = Theme.colorsOf(this, pz)
+            val on = (pr().getString("theme", "ocean") ?: "ocean") == pz.id
+            val chip = vbox().apply { gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(4), dp(4), dp(4), dp(4)) }
+            chip.addView(View(this).apply {
+                background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(c1, c2)).apply { shape = GradientDrawable.OVAL; if (on) setStroke(dp(3), FG) }
+            }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            chip.addView(tv(pz.name, 11f, on, if (on) FG else DIM))
+            chip.setOnClickListener { pr().edit().putString("theme", pz.id).apply(); applyTheme(); render() }
+            tr.addView(chip, LinearLayout.LayoutParams(dp(78), -2))
+        }
+        col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(tr) }, lp(top = 4))
+        col.addView(tv("Tryb", 14f, color = DIM), lp(top = 10))
+        val mr2 = hbox()
+        for ((k, n) in Theme.MODES) mr2.addView(btn(n, (pr().getString("mode", "system") ?: "system") == k) { pr().edit().putString("mode", k).apply(); applyTheme(); render() }, lp(-2, -2).apply { rightMargin = dp(6) })
+        col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(mr2) }, lp(top = 4))
+
         header("Widżety")
-        toggle("Jasne widżety", "Czarny tekst na białym tle zamiast białego na czarnym", pr().getBoolean("widgetLight", false)) { pr().edit().putBoolean("widgetLight", it).apply(); Widgets.updateAll(this) }
+        val ws = pr().getString("widgetStyle", if (pr().getBoolean("widgetLight", false)) "light" else "weather") ?: "weather"
+        val wr = hbox()
+        for ((k, n) in listOf("weather" to "Niebo wg pogody", "glass" to "Szkło", "dark" to "Ciemne", "light" to "Jasne"))
+            wr.addView(btn(n, ws == k) { pr().edit().putString("widgetStyle", k).apply(); Widgets.updateAll(this); render() }, lp(-2, -2).apply { rightMargin = dp(6) })
+        col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(wr) }, lp(top = 4))
         col.addView(tv("Dostępne: Pogoda 1×1, 2×1, 2×2 · Zegar i pogoda 4×1 · Prognoza 4×2 i 4×3 · Budzik 1×1 i 2×1. Każdy sam dopasowuje układ po zmianie rozmiaru. Dodasz je, przytrzymując pusty ekran → Widżety → Świt.", 12f, color = DIM), lp(top = 4))
 
         header("Aktualizacje")

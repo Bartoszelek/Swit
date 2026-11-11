@@ -20,7 +20,9 @@ object Widgets {
     private val WEATHER = listOf(WWeather1::class.java, WWeather2::class.java, WWeather::class.java, WClock::class.java, WForecast::class.java, WForecast3::class.java)
     private val ALARM = listOf(WAlarm1::class.java, WAlarm2::class.java)
 
-    private fun light(c: Context) = Prefs.get(c).getBoolean("widgetLight", false)
+    /** Styl widżetów: weather (kolor nieba wg pogody), dark, light, glass. */
+    private fun style(c: Context) = Prefs.get(c).getString("widgetStyle", if (Prefs.get(c).getBoolean("widgetLight", false)) "light" else "weather") ?: "weather"
+    private fun light(c: Context) = style(c) == "light"
     private fun fg(c: Context) = if (light(c)) Color.BLACK else Color.WHITE
 
     private fun open(c: Context, tab: String) = PendingIntent.getActivity(c, tab.hashCode(), Intent(c, MainActivity::class.java).putExtra("tab", tab)
@@ -58,9 +60,18 @@ object Widgets {
         if (light(c)) rv.setInt(id, "setColorFilter", Color.BLACK)
     }
 
-    private fun base(c: Context, layout: Int, tab: String): RemoteViews {
+    /** Kolorowa ikona pogody (rysowana – ostra w każdym rozmiarze). */
+    private fun wicon(rv: RemoteViews, id: Int, code: Int, day: Boolean, px: Int) = rv.setImageViewBitmap(id, Art.icon(code, day, px))
+
+    private fun base(c: Context, layout: Int, tab: String, f: Forecast? = null): RemoteViews {
         val rv = RemoteViews(c.packageName, layout)
-        rv.setInt(R.id.w_root, "setBackgroundResource", if (light(c)) R.drawable.widget_bg_light else R.drawable.widget_bg)
+        val bg = when (style(c)) {
+            "light" -> R.drawable.widget_bg_light
+            "dark" -> R.drawable.widget_bg
+            "glass" -> R.drawable.widget_glass
+            else -> if (f != null) Art.widgetBg(f.code, Art.phase(f)) else R.drawable.sky_night
+        }
+        rv.setInt(R.id.w_root, "setBackgroundResource", bg)
         rv.setOnClickPendingIntent(R.id.w_root, open(c, tab))
         return rv
     }
@@ -79,14 +90,14 @@ object Widgets {
     }
 
     private fun weatherView(c: Context, layout: Int, f: Forecast?): RemoteViews {
-        val rv = base(c, layout, "weather")
+        val rv = base(c, layout, "weather", f)
         if (f == null) {
             text(rv, c, R.id.w_temp, "--°")
             if (layout != R.layout.wg_1x1) try { text(rv, c, R.id.w_desc, "Otwórz Świt") } catch (e: Exception) {}
             icon(rv, c, R.id.w_icon, R.drawable.w_cloud)
             return rv
         }
-        icon(rv, c, R.id.w_icon, Weather.icon(f.code, f.day))
+        wicon(rv, R.id.w_icon, f.code, f.day, 160)
         text(rv, c, R.id.w_temp, Weather.deg(f.temp))
         val d = f.days.firstOrNull()
         when (layout) {
@@ -107,7 +118,7 @@ object Widgets {
                 for ((i, day) in f.days.take(5).withIndex()) {
                     val cell = RemoteViews(c.packageName, R.layout.wg_cell)
                     text(cell, c, R.id.c_top, if (i == 0) "dziś" else dn.format(Date(day.t)))
-                    icon(cell, c, R.id.c_icon, Weather.icon(day.code))
+                    wicon(cell, R.id.c_icon, day.code, true, 72)
                     text(cell, c, R.id.c_bot, "${Weather.deg(day.max)} ${Weather.deg(day.min)}")
                     rv.addView(R.id.w_days, cell)
                 }
@@ -118,7 +129,7 @@ object Widgets {
                     for (h in f.hours.filterIndexed { i, _ -> i % 2 == 1 }.take(6)) {
                         val cell = RemoteViews(c.packageName, R.layout.wg_cell)
                         text(cell, c, R.id.c_top, hf.format(Date(h.t)))
-                        icon(cell, c, R.id.c_icon, Weather.icon(h.code, h.day))
+                        wicon(cell, R.id.c_icon, h.code, h.day, 72)
                         text(cell, c, R.id.c_bot, Weather.deg(h.temp) + if (h.pop >= 30) " ${h.pop}%" else "")
                         rv.addView(R.id.w_hours, cell)
                     }
@@ -129,7 +140,7 @@ object Widgets {
     }
 
     private fun alarmView(c: Context, layout: Int): RemoteViews {
-        val rv = base(c, layout, "alarms")
+        val rv = base(c, layout, "alarms", Weather.cached(c))
         icon(rv, c, R.id.a_icon, R.drawable.ic_alarm)
         val n = Alarms.nextAny(c)
         if (n == null) { text(rv, c, R.id.a_time, "—"); text(rv, c, R.id.a_day, "brak budzików") }

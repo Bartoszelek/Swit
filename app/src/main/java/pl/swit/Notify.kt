@@ -204,8 +204,8 @@ class AlarmActivity : Activity(), SensorEventListener {
     }
     private fun btn(t: String, primary: Boolean, f: () -> Unit) = TextView(this).apply {
         text = t; textSize = 22f; gravity = Gravity.CENTER; typeface = Typeface.DEFAULT_BOLD
-        setTextColor(if (primary) Color.BLACK else Color.WHITE)
-        background = GradientDrawable().apply { setColor(if (primary) Color.WHITE else Color.BLACK); setStroke(dp(2), Color.WHITE); cornerRadius = dp(40).toFloat() }
+        setTextColor(if (primary) 0xFF1B1F2A.toInt() else Color.WHITE)
+        background = GradientDrawable().apply { setColor(if (primary) 0xF2FFFFFF.toInt() else 0x33FFFFFF); setStroke(dp(2), 0xCCFFFFFF.toInt()); cornerRadius = dp(40).toFloat() }
         setPadding(dp(20), dp(22), dp(20), dp(22)); setOnClickListener { f() }
     }
     private fun lp(top: Int = 0) = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(top) }
@@ -216,8 +216,19 @@ class AlarmActivity : Activity(), SensorEventListener {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         id = intent.getIntExtra("id", 0); kind = intent.getStringExtra("kind") ?: "alarm"
         alarm = if (kind == "timer") null else Alarms.get(this, id)
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK); setPadding(dp(28), dp(60), dp(28), dp(40)); gravity = Gravity.CENTER_HORIZONTAL }
-        setContentView(root)
+        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(28), dp(60), dp(28), dp(40)); gravity = Gravity.CENTER_HORIZONTAL }
+        // animowany wschód słońca w tle – niebo jaśnieje razem z narastającym dźwiękiem
+        val frame = android.widget.FrameLayout(this)
+        val sky = SkyView(this).apply { scene = Scene.CLEAR; phase = 1; sunrise = 0f }
+        frame.addView(sky, android.widget.FrameLayout.LayoutParams(-1, -1))
+        frame.addView(root, android.widget.FrameLayout.LayoutParams(-1, -1))
+        setContentView(frame)
+        val secs = ((alarm?.ramp ?: 30).coerceAtLeast(20) * 2).toLong()
+        android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = secs * 1000; interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener { sky.sunrise = it.animatedValue as Float }
+        }.start()
+        window.statusBarColor = Color.TRANSPARENT; window.navigationBarColor = Color.TRANSPARENT
         registerReceiver(closeRx, IntentFilter(CLOSE), RECEIVER_NOT_EXPORTED)
         main()
     }
@@ -234,9 +245,16 @@ class AlarmActivity : Activity(), SensorEventListener {
     private fun main() {
         root.removeAllViews()
         val cal = Calendar.getInstance()
-        root.addView(tv("%d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)), 86f, true))
+        val clock = tv("%d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)), 86f, true).apply { setShadowLayer(18f, 0f, 3f, 0x88000000.toInt()) }
+        root.addView(clock)
+        android.animation.ObjectAnimator.ofPropertyValuesHolder(clock,
+            android.animation.PropertyValuesHolder.ofFloat("scaleX", 1f, 1.06f), android.animation.PropertyValuesHolder.ofFloat("scaleY", 1f, 1.06f)).apply {
+            duration = 1100; repeatCount = android.animation.ValueAnimator.INFINITE; repeatMode = android.animation.ValueAnimator.REVERSE
+        }.start()
         root.addView(tv(when (kind) { "timer" -> "Minutnik – koniec"; "pre" -> "Za ${alarm?.pre ?: 0} min budzik ${alarm?.time() ?: ""}"; else -> alarm?.label?.ifBlank { null } ?: "Budzik" }, 22f), lp(6))
         Weather.cached(this)?.let { f ->
+            root.addView(android.widget.ImageView(this).apply { setImageBitmap(Art.icon(f.code, f.day, dp(84))) },
+                LinearLayout.LayoutParams(dp(84), dp(84)).apply { topMargin = dp(18); gravity = Gravity.CENTER_HORIZONTAL })
             root.addView(tv("${Weather.deg(f.temp)} · ${Weather.text(f.code)} · ${f.place.name}", 17f, color = 0xFFBBBBBB.toInt()), lp(14))
             f.days.firstOrNull()?.let { d -> root.addView(tv("Dziś ${Weather.deg(d.min)} – ${Weather.deg(d.max)}" + if (d.pop >= 30) " · opady ${d.pop}%" else "", 15f, color = 0xFF999999.toInt()), lp(2)) }
         }
@@ -280,7 +298,7 @@ class AlarmActivity : Activity(), SensorEventListener {
         root.addView(tv("$q = ?", 48f, true), lp(30))
         val e = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED; textSize = 34f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
-            background = GradientDrawable().apply { setStroke(dp(2), Color.WHITE); cornerRadius = dp(16).toFloat() }; setPadding(dp(10), dp(14), dp(10), dp(14))
+            background = GradientDrawable().apply { setColor(0x55000000); setStroke(dp(2), Color.WHITE); cornerRadius = dp(16).toFloat() }; setPadding(dp(10), dp(14), dp(10), dp(14))
         }
         root.addView(e, lp(24))
         root.addView(btn("Sprawdź", true) {
@@ -331,7 +349,7 @@ class AlarmActivity : Activity(), SensorEventListener {
         val e = EditText(this).apply {
             textSize = 30f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); typeface = Typeface.MONOSPACE
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            background = GradientDrawable().apply { setStroke(dp(2), Color.WHITE); cornerRadius = dp(16).toFloat() }; setPadding(dp(10), dp(14), dp(10), dp(14))
+            background = GradientDrawable().apply { setColor(0x55000000); setStroke(dp(2), Color.WHITE); cornerRadius = dp(16).toFloat() }; setPadding(dp(10), dp(14), dp(10), dp(14))
         }
         root.addView(e, lp(24))
         root.addView(btn("Sprawdź", true) {
