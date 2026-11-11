@@ -1204,12 +1204,17 @@ class MainActivity : Activity() {
             col.addView(tv("Stuknij widżet, żeby ustawić, co pokazuje, tło, przezroczystość, rozmiary i położenie.", 12f, color = DIM), lp(top = 2))
             for ((wid, name) in placed) {
                 val r = hbox().apply { setPadding(dp(14), dp(12), dp(14), dp(12)); background = round(SURF, 16) }
-                r.addView(tv("▦  $name", 15f), lp(0, -2, 1f))
+                val o = android.appwidget.AppWidgetManager.getInstance(this).getAppWidgetOptions(wid)
+                val lv = vbox()
+                lv.addView(tv("▦  $name", 15f))
+                lv.addView(tv("rozmiar ok. ${o.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)}×${o.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)} dp", 11f, color = DIM))
+                r.addView(lv, lp(0, -2, 1f))
                 r.addView(tv("Dostosuj ›", 14f, true, Theme.accent))
                 r.setOnClickListener { startActivity(Intent(this, WidgetSetup::class.java).putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, wid)) }
                 col.addView(r, lp(top = 6))
             }
         }
+        col.addView(btn("Odśwież wszystkie widżety") { Widgets.updateAll(this); toast("Odświeżono") }, lp(-2, -2, top = 8))
         col.addView(tv("Na ekranie głównym: przytrzymaj widżet → „Ustawienia” otwiera to samo okno. Rozmiar zmienisz, przeciągając uchwyty – każdy widżet można zmniejszyć do 1×1 i powiększyć na cały ekran.", 12f, color = DIM), lp(top = 8))
 
         header("Aktualizacje")

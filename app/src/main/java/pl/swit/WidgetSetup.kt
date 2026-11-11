@@ -111,16 +111,52 @@ class WidgetSetup : Activity() {
         preview.post { refresh() }
     }
 
+    /** W podglądzie nic nie otwiera aplikacji – dotyk służy do przesuwania. */
+    private fun inert(v: View) {
+        v.setOnClickListener(null); v.isClickable = false; v.isLongClickable = false
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) inert(v.getChildAt(i))
+    }
+
     private fun refresh() {
         preview.removeAllViews()
         selBar.removeAllViews()
         try {
             if (d.free && android.os.Build.VERSION.SDK_INT >= 31) { freeEditor(); return }
             val v = WD.render(this, d, wDp, hDp).apply(this, preview)
+            inert(v)
             preview.addView(v, FrameLayout.LayoutParams(-1, -1))
+            // w układzie „jeden pod drugim” przytrzymanie elementu przełącza na układ swobodny w tym samym miejscu
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                val gd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+                    override fun onDown(e: android.view.MotionEvent) = true
+                    override fun onLongPress(e: android.view.MotionEvent) { toFree(v, e.x, e.y) }
+                })
+                v.setOnTouchListener { _, e -> gd.onTouchEvent(e) }
+                selBar.addView(tv("Przytrzymaj element na podglądzie, żeby go przesuwać palcem.", 12f, color = Theme.dim))
+            }
         } catch (e: Exception) {
             preview.addView(tv("Podgląd niedostępny: ${e.message}", 12f, color = Color.WHITE))
         }
+    }
+
+    /** Zamienia bieżący układ na swobodny, zachowując położenie elementów; zaznacza element pod palcem. */
+    private fun toFree(root: View, tx: Float, ty: Float) {
+        val body = root.findViewById<android.view.ViewGroup>(R.id.w_body) ?: return
+        val wPx = root.width.toFloat().coerceAtLeast(1f); val hPx = root.height.toFloat().coerceAtLeast(1f)
+        val keys = d.shown
+        for (i in 0 until body.childCount) {
+            val key = keys.getOrNull(i) ?: continue
+            val blk = body.getChildAt(i)
+            val first = (blk as? android.view.ViewGroup)?.getChildAt(0)
+            val left = blk.left + (if (key == "hours" || key == "days") 0 else first?.left ?: 0)
+            d.pos[key] = floatArrayOf(left / wPx, blk.top / hPx, d.pos[key]?.getOrNull(2) ?: 1f)
+            if (tx >= blk.left && tx <= blk.right && ty >= blk.top && ty <= blk.bottom) sel = key
+        }
+        d.free = true
+        root.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        android.widget.Toast.makeText(this, "Układ swobodny – teraz przeciągnij element palcem", android.widget.Toast.LENGTH_SHORT).show()
+        build()
+        preview.post { refresh() }
     }
 
     /** Układ swobodny: przeciągaj elementy palcem, rozsuwaj dwoma palcami, linie pomocnicze przyciągają do środka. */
@@ -133,6 +169,7 @@ class WidgetSetup : Activity() {
         val sc = minOf(1f, (availW - dp(28)) / wPx, (availH - dp(28)) / hPx)
         val stage = FrameLayout(this)
         val v = WD.render(this, d, wDp, hDp).apply(this, stage)
+        inert(v)
         stage.addView(v, FrameLayout.LayoutParams(wPx.toInt(), hPx.toInt()))
         guide = View(this).apply { setBackgroundColor(0xCCFF375F.toInt()); visibility = View.GONE }
         stage.addView(guide, FrameLayout.LayoutParams(dp(2), hPx.toInt()).apply { leftMargin = (wPx / 2).toInt() })
@@ -143,6 +180,7 @@ class WidgetSetup : Activity() {
         val keys = d.shown
         for (i in 0 until free.childCount) {
             val child = free.getChildAt(i); val key = keys.getOrNull(i) ?: continue
+            child.isClickable = true
             if (key == sel) child.background = GradientDrawable().apply { setStroke(dp(2), Theme.accent); cornerRadius = dp(6).toFloat() }
             var lastX = 0f; var lastY = 0f; var scale = 1f
             val sg = android.view.ScaleGestureDetector(this, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -267,6 +305,8 @@ class WidgetSetup : Activity() {
     private fun save() {
         WD.save(this, wid, d)
         try { AppWidgetManager.getInstance(this).updateAppWidget(wid, WD.render(this, d, wDp, hDp)) } catch (e: Exception) {}
+        Widgets.updateAll(this)
+        android.widget.Toast.makeText(this, "Zapisano – widżet zmienił się na ekranie", android.widget.Toast.LENGTH_SHORT).show()
         setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, wid))
         finish()
     }

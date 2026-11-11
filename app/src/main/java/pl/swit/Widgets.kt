@@ -50,7 +50,10 @@ object Widgets {
         val names = mapOf(WWeather1::class.java to "Pogoda 1×1", WWeather2::class.java to "Pogoda 2×1", WWeather::class.java to "Pogoda 2×2",
             WClock::class.java to "Zegar i pogoda 4×1", WForecast::class.java to "Prognoza 4×2", WForecast3::class.java to "Prognoza 4×3",
             WForecast4::class.java to "Prognoza 4×4", WMinimal::class.java to "Zegar minimalistyczny", WAlarm1::class.java to "Budzik 1×1", WAlarm2::class.java to "Budzik 2×1")
-        return names.flatMap { (cls, n) -> m.getAppWidgetIds(ComponentName(c, cls)).map { it to n } }
+        // pomijamy „duchy”: widżety, których dodanie się nie udało, a system dalej je pamięta (brak rozmiaru)
+        return names.flatMap { (cls, n) -> m.getAppWidgetIds(ComponentName(c, cls)).filter { id ->
+            m.getAppWidgetInfo(id) != null && m.getAppWidgetOptions(id).getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) > 0
+        }.map { id -> id to n } }
     }
 
     private fun text(rv: RemoteViews, c: Context, id: Int, s: String) { rv.setTextViewText(id, s); rv.setTextColor(id, fg(c)) }
