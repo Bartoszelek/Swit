@@ -133,8 +133,11 @@ class AdvActivity : Activity() {
         fun cut(a: DoubleArray) = a.copyOfRange(from, to)
         val xs = d.ht.copyOfRange(from, to)
         val step = when (hoursRange) { 48 -> 22f; 168 -> 10f; else -> 5f }
-        fun chart(title: String, s: List<Series>, hgt: Int, setup: ChartView.() -> Unit = {}) {
-            val c = ChartView(this).apply { this.xs = xs; this.series = s; this.step = step; this.title = title; setup() }
+        fun chart(name: String, s: List<Series>, hgt: Int, setup: ChartView.() -> Unit = {}) {
+            val hx = xs; val hs = step
+            val c = ChartView(this)
+            c.xs = hx; c.series = s; c.step = hs; c.title = name
+            c.setup()
             card(col, c, hgt)
         }
         chart("Temperatura (°C)", listOf(Series("Temperatura", cut(d.temp), 0xFFFF9F0A.toInt(), unit = "°"),
@@ -181,8 +184,9 @@ class AdvActivity : Activity() {
         val hi = DoubleArray(n) { if (it < d.dt.size) Double.NaN else d.xMaxHi[ext[it - d.dt.size]] }
         val sum = DoubleArray(n) { if (it < d.dt.size) d.dSum[it] else d.xSum[ext[it - d.dt.size]] }
         col.addView(tv("${n} dni: dokładna prognoza na ${d.dt.size} dni, dalej trend z ${d.xSource.ifEmpty { "ensemble" }}", 12f, c = Theme.dim), lp(top = 6))
+        val dx = xs
         val c1 = ChartView(this).apply {
-            this.xs = xs; daily = true; step = 30f; title = "Temperatura w dzień i w nocy (°C)"
+            this.xs = dx; daily = true; step = 30f; title = "Temperatura w dzień i w nocy (°C)"
             series = listOf(Series("Dzień", dayT, 0xFFFF9F0A.toInt(), unit = "°"), Series("Noc", nightT, 0xFF0A84FF.toInt(), unit = "°"),
                 Series("Zakres dnia (80% scenariuszy)", lo, 0xFFFF9F0A.toInt(), "band", "°", hi = hi))
             icons = IntArray(n) { if (it < d.dt.size) d.dCode[it] else 3 }.also { a -> for (k in d.dt.size until n) a[k] = if (sum[k] > 3) 61 else if (sum[k] > 0.5) 2 else 1 }
@@ -190,14 +194,14 @@ class AdvActivity : Activity() {
         }
         card(col, c1, 230)
         val c2 = ChartView(this).apply {
-            this.xs = xs; daily = true; step = 30f; title = "Opady w ciągu doby (mm)"
+            this.xs = dx; daily = true; step = 30f; title = "Opady w ciągu doby (mm)"
             series = listOf(Series("Opady", sum, 0xFF0A84FF.toInt(), "bar", " mm", fmt = "%.1f"),
                 Series("Szansa", DoubleArray(n) { if (it < d.dt.size) d.dProb[it] else Double.NaN }, 0xFF64D2FF.toInt(), "dash", "%", axis = 1))
             marker = if (ext.isNotEmpty()) d.dt.size else -1; markerLabel = "trend"
         }
         card(col, c2, 170)
         val c3 = ChartView(this).apply {
-            this.xs = d.dt; daily = true; step = 30f; title = "Wiatr maks. i porywy (km/h)"
+            this.xs = d.dt.copyOf(); daily = true; step = 30f; title = "Wiatr maks. i porywy (km/h)"
             series = listOf(Series("Wiatr", d.dWind, 0xFF5AC8FA.toInt(), unit = " km/h"), Series("Porywy", d.dGust, 0xFFFF453A.toInt(), "dash", " km/h"))
             arrows = d.dDir
         }

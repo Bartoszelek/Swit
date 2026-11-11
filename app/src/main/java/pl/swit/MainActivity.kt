@@ -1190,10 +1190,10 @@ class MainActivity : Activity() {
             if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), 3); return@btn }
             Thread { val n = Rem.importBirthdays(this); h.post { toast(if (n > 0) "Dodano urodziny: $n" else "Brak nowych urodzin w kontaktach") } }.start()
         }, lp(-2, -2, top = 6))
+        col.addView(tv("Wpisy całodniowe (urodziny, wyjazdy) przypominaj o godzinie:", 14f), lp(top = 10))
         val adr = hbox()
-        adr.addView(tv("Wpisy całodniowe przypominaj o", 14f), lp(0, -2, 1f))
-        for (hh in listOf(7, 8, 9, 10)) adr.addView(btn("$hh:00", pr().getInt("allDayAt", 9) == hh) { pr().edit().putInt("allDayAt", hh).apply(); Rem.schedule(this); render() }, lp(-2, -2).apply { leftMargin = dp(4) })
-        col.addView(adr, lp(top = 8))
+        for (hh in listOf(7, 8, 9, 10)) adr.addView(btn("$hh:00", pr().getInt("allDayAt", 9) == hh) { pr().edit().putInt("allDayAt", hh).apply(); Rem.schedule(this); render() }, lp(0, -2, 1f).apply { rightMargin = dp(6) })
+        col.addView(adr, lp(top = 6))
         toggle("„Mój dzień” po wyłączeniu budzika", "Pogoda, dzisiejsze wpisy i urodziny zaraz po wstaniu", pr().getBoolean("myDay", true)) { pr().edit().putBoolean("myDay", it).apply() }
         col.addView(btn("Pora snu…") { sleepSheet() }, lp(-2, -2, top = 6))
 
