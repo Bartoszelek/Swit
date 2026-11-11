@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Swit" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF000000</item>
+        <item name="android:statusBarColor">#FF000000</item>
+        <item name="android:navigationBarColor">#FF000000</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:colorAccent">#FFFFFFFF</item>
+    </style>
+    <style name="Theme.Swit.Alarm" parent="Theme.Swit">
+        <item name="android:windowShowWallpaper">false</item>
+    </style>
+    <color name="ic_launcher_bg">#FFFFFFFF</color>
+    <string name="app_name">Świt</string>
+    <string name="wi_weather1">Pogoda 1×1 – ikona i temperatura</string>
+    <string name="wi_weather2">Pogoda 2×1 – temperatura i opis</string>
+    <string name="wi_weather">Pogoda 2×2 – szczegóły dnia</string>
+    <string name="wi_clock">Zegar, pogoda i budzik 4×1</string>
+    <string name="wi_forecast">Prognoza 4×2 – 5 dni</string>
+    <string name="wi_forecast3">Prognoza 4×3 – godziny i dni</string>
+    <string name="wi_alarm1">Budzik 1×1 – najbliższy alarm</string>
+    <string name="wi_alarm2">Budzik 2×1 – najbliższy alarm i drzemka</string>
+</resources>
