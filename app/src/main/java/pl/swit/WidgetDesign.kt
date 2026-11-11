@@ -162,6 +162,8 @@ object WD {
         val clockSize = d.clock * fit
         val iconDp = (d.icon * fit).toInt().coerceAtLeast(14)
         val rv = RemoteViews(c.packageName, if (freeMode) R.layout.wg_free else R.layout.wg_custom)
+        // system przy odświeżaniu nakłada zmiany na istniejący widżet – najpierw usuwamy starą treść, inaczej elementy się dublują
+        rv.removeAllViews(if (freeMode) R.id.w_free else R.id.w_body)
         rv.setOnClickPendingIntent(R.id.w_root, open(c, "weather"))
         // tło
         if (d.bg == "none" || d.alpha == 0) rv.setViewVisibility(R.id.w_bg, View.GONE)
