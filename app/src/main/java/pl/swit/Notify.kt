@@ -270,7 +270,33 @@ class AlarmActivity : Activity(), SensorEventListener {
 
     private fun dismiss() {
         Ring.active?.doDismiss() ?: run { if (kind == "alarm") Alarms.dismissed(this, id); stopService(Intent(this, Ring::class.java)) }
-        finish()
+        if (kind == "alarm" && Prefs.get(this).getBoolean("myDay", true)) myDay() else finish()
+    }
+
+    /** „Mój dzień” po wstaniu: pogoda, dzisiejsze wpisy z kalendarza, urodziny. */
+    private fun myDay() {
+        sm?.unregisterListener(this)
+        root.removeAllViews()
+        root.addView(tv("Dzień dobry!", 34f, true).apply { setShadowLayer(14f, 0f, 2f, 0x88000000.toInt()) })
+        root.addView(tv(SimpleDateFormat("EEEE, d MMMM", Locale("pl")).format(Date()), 18f), lp(4))
+        Weather.cached(this)?.let { f ->
+            val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, dp(18), 0, dp(6)) }
+            r.addView(android.widget.ImageView(this).apply { setImageBitmap(Art.icon(f.code, f.day, dp(72))) }, LinearLayout.LayoutParams(dp(72), dp(72)))
+            r.addView(tv(Weather.deg(f.temp), 48f, true), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(12) })
+            root.addView(r)
+            root.addView(tv(Weather.summary(f), 15f))
+            Weather.nowcast(f).takeIf { it.isNotEmpty() }?.let { root.addView(tv("☂ $it", 15f, true), lp(6)) }
+            for ((_, w) in Weather.warnings(f)) root.addView(tv("⚠ $w", 14f, true, 0xFFFFD27A.toInt()), lp(4))
+        }
+        val from = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0) }.timeInMillis
+        val today = try { Rem.range(this, from, from + 86_400_000L) } catch (e: Exception) { emptyList() }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(12)); background = GradientDrawable().apply { setColor(0x44000000); cornerRadius = dp(18).toFloat() } }
+        box.addView(tv(if (today.isEmpty()) "Dziś nic w kalendarzu" else "Dziś w kalendarzu", 16f, true).apply { gravity = Gravity.START })
+        val hf = SimpleDateFormat("H:mm", Locale("pl"))
+        for (o in today.take(7)) box.addView(tv((if (o.ev.allDay) "cały dzień" else hf.format(Date(o.start))) + "  " + Rem.typeIcon(o.ev.type) + " " + o.ev.title, 15f).apply { gravity = Gravity.START }, lp(6))
+        root.addView(box, lp(20))
+        root.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(btn("Zaczynamy dzień", true) { finish() })
     }
 
     // ------------------------------------------------------------ zadania
@@ -279,6 +305,7 @@ class AlarmActivity : Activity(), SensorEventListener {
             "math" -> math()
             "shake" -> shake()
             "captcha" -> captcha()
+            "memory" -> memory()
             else -> dismiss()
         }
     }
@@ -337,6 +364,45 @@ class AlarmActivity : Activity(), SensorEventListener {
     }
 
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+
+    /** Pamięć: zapamiętaj podświetlane pola i powtórz kolejność. */
+    private fun memory() {
+        root.removeAllViews()
+        val need = alarm?.count ?: 3
+        val len = 3 + (alarm?.level ?: 1) + solved
+        val seq = List(len) { Random.nextInt(9) }
+        root.addView(tv("Zapamiętaj kolejność (${solved + 1} z $need)", 20f, true))
+        val info = tv("Patrz…", 16f, color = 0xFFDDDDDD.toInt())
+        root.addView(info, lp(8))
+        val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val cells = ArrayList<TextView>()
+        for (r in 0 until 3) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (k in 0 until 3) {
+                val t = TextView(this).apply { background = GradientDrawable().apply { setColor(0x40FFFFFF); cornerRadius = dp(18).toFloat() } }
+                cells.add(t)
+                row.addView(t, LinearLayout.LayoutParams(0, dp(92), 1f).apply { setMargins(dp(6), dp(6), dp(6), dp(6)) })
+            }
+            grid.addView(row)
+        }
+        root.addView(grid, lp(24))
+        root.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(backRow())
+        fun light(i: Int, on: Boolean) { (cells[i].background as GradientDrawable).setColor(if (on) 0xF2FFFFFF.toInt() else 0x40FFFFFF) }
+        val h = android.os.Handler(mainLooper)
+        seq.forEachIndexed { n, i -> h.postDelayed({ light(i, true) }, 900L + n * 800L); h.postDelayed({ light(i, false) }, 900L + n * 800L + 500L) }
+        var pos = 0
+        h.postDelayed({
+            info.text = "Teraz Ty – stukaj w tej samej kolejności"
+            cells.forEachIndexed { i, cell ->
+                cell.setOnClickListener {
+                    light(i, true); h.postDelayed({ light(i, false) }, 180)
+                    if (i == seq[pos]) { pos++; if (pos == seq.size) { solved++; if (solved >= need) dismiss() else h.postDelayed({ memory() }, 400) } }
+                    else { info.text = "Pomyłka – od nowa"; h.postDelayed({ memory() }, 700) }
+                }
+            }
+        }, 900L + seq.size * 800L)
+    }
 
     private fun captcha() {
         root.removeAllViews()

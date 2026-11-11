@@ -123,13 +123,16 @@ class MainActivity : Activity() {
         root.addView(tabs)
         setContentView(root)
         intent?.getStringExtra("tab")?.let { tab = it }
+        intent?.getLongExtra("day", 0L)?.takeIf { it > 0 }?.let { calDay = it; calMonth.timeInMillis = it }
         if (intent?.getBooleanExtra("stopTimer", false) == true) Alarms.stopTimer(this)
         val need = ArrayList<String>()
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) need += Manifest.permission.POST_NOTIFICATIONS
         if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) need += Manifest.permission.ACCESS_COARSE_LOCATION
+        if (checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) need += Manifest.permission.READ_CALENDAR
         if (need.isNotEmpty()) requestPermissions(need.toTypedArray(), 1)
         Notify.schedule(this)
         Alarms.scheduleAll(this)
+        Rem.schedule(this)
         forecast = try { Weather.cached(this) } catch (e: Exception) { null }
         load(false)
         render()
@@ -150,6 +153,7 @@ class MainActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intent.getStringExtra("tab")?.let { tab = it }
+        intent.getLongExtra("day", 0L).takeIf { it > 0 }?.let { calDay = it; calMonth.timeInMillis = it }
         if (intent.getBooleanExtra("stopTimer", false)) Alarms.stopTimer(this)
         render()
     }
@@ -174,7 +178,7 @@ class MainActivity : Activity() {
 
     private fun drawTabs() {
         tabs.removeAllViews()
-        for ((k, n) in listOf("weather" to "Pogoda", "alarms" to "Budziki", "timer" to "Minutnik", "settings" to "Ustawienia")) {
+        for ((k, n) in listOf("weather" to "Pogoda", "alarms" to "Budzik", "cal" to "Kalendarz", "settings" to "Ustawienia")) {
             val on = k == tab
             tabs.addView(tv(n, 13f, on, if (on) Theme.onAccent else DIM).apply {
                 gravity = Gravity.CENTER; background = if (on) Theme.gradient(dp(18).toFloat()) else null; setPadding(0, dp(10), 0, dp(10))
@@ -191,7 +195,8 @@ class MainActivity : Activity() {
         try {
             when (tab) {
                 "alarms" -> renderAlarms()
-                "timer" -> renderTimer()
+                "timer" -> { tab = "alarms"; aSub = "timer"; renderAlarms() }
+                "cal" -> renderCal()
                 "settings" -> renderSettings()
                 else -> renderWeather()
             }
@@ -379,45 +384,139 @@ class MainActivity : Activity() {
     }
 
     // ================================================================== BUDZIKI
+    private var aSub = "alarms"
+    private var fabOpen = false
+
+    private fun challengeName(c: String) = when (c) { "math" -> "LICZBY"; "shake" -> "POTRZĄSANIE"; "captcha" -> "PRZEPISYWANIE"; "memory" -> "PAMIĘĆ"; else -> "PROSTY" }
+
     private fun renderAlarms() {
-        col.addView(tv("Budziki", 32f, true))
+        // nagłówek: nocne góry, pora snu i najbliższy alarm
+        val head = android.widget.FrameLayout(this)
+        head.addView(MountainView(this), android.widget.FrameLayout.LayoutParams(-1, -1))
+        val cards = hbox().apply { setPadding(dp(4), 0, dp(4), dp(10)); gravity = Gravity.BOTTOM }
+        val df = SimpleDateFormat("H:mm", Locale("pl"))
+        val bt = Rem.bedtime(this)
         val n = Alarms.nextAny(this)
-        if (n != null) {
-            val mins = (n.second - System.currentTimeMillis()) / 60_000
-            col.addView(tv("Najbliższy za ${mins / 60} h ${mins % 60} min", 14f, color = DIM), lp(top = 2))
+        fun card(icon: String, txt: String, f: () -> Unit) {
+            val b = hbox().apply { background = round(Theme.withAlpha(Color.BLACK, 0.35f), 18); setPadding(dp(12), dp(10), dp(12), dp(10)); setOnClickListener { f() } }
+            b.addView(tv(icon, 26f), lp(-2, -2).apply { rightMargin = dp(10) })
+            b.addView(tv(txt, 13f, false, Color.WHITE), lp(0, -2, 1f))
+            cards.addView(b, lp(0, -2, 1f).apply { leftMargin = dp(4); rightMargin = dp(4) })
         }
+        card("🛏", if (bt != null && bt > System.currentTimeMillis() - 3600_000L) "Pora snu\n${df.format(Date(bt))}" else "Nie masz dziś\nustawionej pory snu") { sleepSheet() }
+        card("⏰", if (n != null) { val m = (n.second - System.currentTimeMillis()) / 60_000; "Za ${m / 60} h ${m % 60} min\n${n.first.time()}" } else "Brak aktywnych\nalarmów") {}
+        head.addView(cards, android.widget.FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        col.addView(head, lp(-1, dp(190)))
+
+        // podzakładki: alarmy, minutnik, stoper
+        val st = hbox().apply { background = round(SURF, 20); setPadding(dp(4), dp(4), dp(4), dp(4)) }
+        for ((k, nm) in listOf("alarms" to "Alarmy", "timer" to "Minutnik", "watch" to "Stoper")) {
+            val on = aSub == k
+            st.addView(tv(nm, 14f, on, if (on) Theme.onAccent else DIM).apply {
+                gravity = Gravity.CENTER; setPadding(0, dp(9), 0, dp(9)); background = if (on) Theme.gradient(dp(16).toFloat()) else null
+                setOnClickListener { aSub = k; render() }
+            }, lp(0, -2, 1f))
+        }
+        col.addView(st, lp(top = 12))
+        when (aSub) {
+            "timer" -> return renderTimer()
+            "watch" -> return renderWatch()
+        }
+
         if (getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() == false) col.addView(btn("⚠ Zezwól na dokładne budziki", true) {
             try { startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName"))) } catch (e: Exception) {}
         }, lp(top = 8))
         if (android.os.Build.VERSION.SDK_INT >= 34 && getSystemService(android.app.NotificationManager::class.java)?.canUseFullScreenIntent() == false) col.addView(btn("⚠ Zezwól na budzik na pełnym ekranie", true) {
             try { startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))) } catch (e: Exception) {}
         }, lp(top = 8))
-        val nap = hbox()
-        nap.addView(tv("Drzemka:", 14f, color = DIM), lp(-2, -2).apply { rightMargin = dp(8) })
-        for (m in listOf(10, 20, 30, 45, 90)) nap.addView(btn("$m min") { Alarms.nap(this, m); toast("Budzik za $m min"); render() }, lp(-2, -2).apply { rightMargin = dp(6) })
-        col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(nap) }, lp(top = 12))
-        col.addView(btn("＋ Nowy budzik", true) { edit(Alarm(0, 7, 0, 0x1f)) }, lp(top = 12))
-        val df = SimpleDateFormat("EEE d.MM HH:mm", Locale("pl"))
-        for (a in Alarms.all(this)) {
-            val box = vbox().apply {
-                background = if (a.on) GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Theme.blend(SURF, Theme.accent, 0.22f), Theme.blend(SURF, Theme.accent2, 0.12f))).apply { cornerRadius = dp(20).toFloat() }
-                else round(SURF, 20)
-                setPadding(dp(16), dp(12), dp(14), dp(12))
+
+        // przycisk „+” rozwijany jak w Alarm Clock Xtreme
+        val fab = vbox().apply { gravity = Gravity.END }
+        if (fabOpen) {
+            fun opt(label: String, icon: String, f: () -> Unit) {
+                val r = hbox().apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END; setPadding(0, dp(4), 0, dp(4)) }
+                r.addView(tv(label, 15f, true).apply { background = round(SURF, 10); setPadding(dp(14), dp(8), dp(14), dp(8)) }, lp(-2, -2).apply { rightMargin = dp(10) })
+                r.addView(tv(icon, 22f, false, Theme.onAccent).apply { gravity = Gravity.CENTER; background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Theme.blend(Theme.accent, Color.BLACK, 0.3f)) } }, LinearLayout.LayoutParams(dp(52), dp(52)))
+                r.setOnClickListener { fabOpen = false; f() }
+                fab.addView(r)
             }
-            val r = hbox()
+            opt("Przypomnienie", "👆") { evEdit(Ev(start = System.currentTimeMillis() + 3600_000L, alerts = mutableListOf(0))) }
+            opt("Szybki alarm", "⚡") { quickSheet() }
+            opt("Alarm", "⏰") { edit(Alarm(0, 7, 0, 0x1f)) }
+        }
+        val plus = tv(if (fabOpen) "✕" else "＋", 30f, true, Theme.onAccent).apply {
+            gravity = Gravity.CENTER; background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Theme.accent, Theme.accent2)).apply { shape = GradientDrawable.OVAL }
+            elevation = dp(6).toFloat(); setOnClickListener { fabOpen = !fabOpen; render() }
+        }
+        fab.addView(plus, LinearLayout.LayoutParams(dp(62), dp(62)).apply { topMargin = dp(6) })
+        col.addView(fab, lp(top = 8))
+
+        val list = Alarms.all(this)
+        if (list.isEmpty()) col.addView(tv("Brak budzików – stuknij ＋", 15f, color = DIM).apply { gravity = Gravity.CENTER }, lp(top = 20))
+        for (a in list) {
+            val row = hbox().apply { setPadding(0, dp(12), 0, dp(12)) }
+            row.addView(Switch(this).apply { isChecked = a.on; setOnCheckedChangeListener { _, b -> a.on = b; Alarms.put(this@MainActivity, a); render() } })
             val l = vbox()
-            l.addView(tv(a.time(), 40f, true, if (a.on) FG else DIM))
-            l.addView(tv(listOf(a.daysText(), a.label).filter { it.isNotBlank() }.joinToString(" · "), 13f, color = DIM))
-            val extra = listOfNotNull(when (a.challenge) { "math" -> "zadania"; "shake" -> "potrząsanie"; "captcha" -> "przepisywanie"; else -> null },
-                if (a.pre > 0) "przedbudzik ${a.pre} min" else null, if (a.holidays) "bez świąt" else null, if (a.wakeCheck) "sprawdzanie" else null)
-            if (extra.isNotEmpty()) l.addView(tv(extra.joinToString(" · "), 12f, color = DIM))
+            l.addView(tv(a.time(), 46f, true, if (a.on) FG else Theme.withAlpha(FG, 0.35f)))
             val nx = Alarms.next(a)
-            if (a.on && nx > 0) l.addView(tv("Następny: " + df.format(Date(nx)), 12f, color = DIM))
-            r.addView(l, lp(0, -2, 1f))
-            r.addView(Switch(this).apply { isChecked = a.on; setOnCheckedChangeListener { _, b -> a.on = b; Alarms.put(this@MainActivity, a); render() } })
-            box.addView(r)
-            box.setOnClickListener { edit(a) }
-            col.addView(box, lp(top = 10))
+            val dayLabel = if (a.days == 0 && nx > 0) (if (dayKey(nx) == dayKey(System.currentTimeMillis())) "DZISIAJ" else "JUTRO") else a.daysText().uppercase()
+            l.addView(tv(dayLabel + (if (a.label.isNotBlank()) " · " + a.label.uppercase() else "") + (if (a.skipUntil > System.currentTimeMillis()) " · POMINIĘTY" else ""), 12f, color = DIM))
+            row.addView(l, lp(0, -2, 1f).apply { leftMargin = dp(14) })
+            val rgt = vbox().apply { gravity = Gravity.END }
+            rgt.addView(tv("⋮", 24f, true, DIM).apply { setPadding(dp(12), 0, dp(4), dp(4)); setOnClickListener { alarmMenu(a) } })
+            rgt.addView(tv(challengeName(a.challenge), 11f, true, if (a.challenge == "none") DIM else ACC))
+            row.addView(rgt)
+            row.setOnClickListener { edit(a) }
+            col.addView(row); col.addView(line(), lp(-1, 1))
+        }
+    }
+
+    private val ACC get() = Theme.accent
+
+    private fun dayKey(t: Long) = Calendar.getInstance().apply { timeInMillis = t }.let { it.get(Calendar.YEAR) * 1000 + it.get(Calendar.DAY_OF_YEAR) }
+
+    private fun alarmMenu(a: Alarm) {
+        sheet(a.time()) { c, d ->
+            c.addView(btn("Edytuj") { d.dismiss(); edit(a) }, lp(top = 10))
+            c.addView(btn("Duplikuj") { d.dismiss(); Alarms.put(this, Alarm.of(a.json()).apply { id = 0 }); render() }, lp(top = 8))
+            if (a.days != 0) c.addView(btn(if (a.skipUntil > System.currentTimeMillis()) "Cofnij pominięcie" else "Pomiń najbliższy") {
+                d.dismiss(); a.skipUntil = if (a.skipUntil > System.currentTimeMillis()) 0 else Alarms.next(a) + 60_000L; Alarms.put(this, a); render()
+            }, lp(top = 8))
+            c.addView(btn("Test dzwonienia") { d.dismiss(); Ring.start(this, a.id, "alarm") }, lp(top = 8))
+            c.addView(btn("Usuń") { d.dismiss(); Alarms.remove(this, a.id); render() }, lp(top = 8))
+        }
+    }
+
+    /** Szybki alarm: za X minut. */
+    private fun quickSheet() {
+        sheet("Szybki alarm") { c, d ->
+            c.addView(tv("Zadzwoni za:", 14f, color = DIM), lp(top = 6))
+            for (row in listOf(listOf(5, 10, 15, 20), listOf(30, 45, 60, 90), listOf(120, 180, 240, 480))) {
+                val r = hbox()
+                for (m in row) r.addView(btn(if (m < 60) "$m min" else "${m / 60} h" + if (m % 60 > 0) " ${m % 60}" else "") {
+                    d.dismiss(); Alarms.nap(this, m); toast("Alarm za $m min"); render()
+                }, lp(0, -2, 1f).apply { setMargins(dp(3), dp(4), dp(3), dp(4)) })
+                c.addView(r)
+            }
+        }
+    }
+
+    /** Pora snu: ile chcesz spać i kiedy przypomnieć. */
+    private fun sleepSheet() {
+        sheet("Pora snu") { c, d ->
+            c.addView(tv("Świt przypomni, kiedy iść spać, żeby wyspać się przed najbliższym budzikiem.", 13f, color = DIM), lp(top = 6))
+            c.addView(tv("Ile chcesz spać", 14f, true), lp(top = 10))
+            val r = hbox()
+            for (m in listOf(360, 420, 450, 480, 540)) r.addView(btn("${m / 60}${if (m % 60 > 0) ",5" else ""} h", pr().getInt("sleepMin", 480) == m) {
+                pr().edit().putInt("sleepMin", m).apply(); Rem.scheduleBedtime(this); d.dismiss(); sleepSheet(); render()
+            }, lp(-2, -2).apply { rightMargin = dp(6) })
+            c.addView(HorizontalScrollView(this).apply { addView(r) }, lp(top = 4))
+            c.addView(tv("Przypomnij przed porą snu", 14f, true), lp(top = 12))
+            val r2 = hbox()
+            for (m in listOf(0, 15, 30, 60)) r2.addView(btn(if (m == 0) "wyłącz" else "$m min", if (m == 0) !pr().getBoolean("bedOn", true) else pr().getBoolean("bedOn", true) && pr().getInt("bedBefore", 30) == m) {
+                pr().edit().putBoolean("bedOn", m > 0).putInt("bedBefore", m).apply(); Rem.scheduleBedtime(this); d.dismiss(); sleepSheet()
+            }, lp(-2, -2).apply { rightMargin = dp(6) })
+            c.addView(HorizontalScrollView(this).apply { addView(r2) }, lp(top = 4))
         }
     }
 
@@ -463,7 +562,7 @@ class MainActivity : Activity() {
                 }
                 c.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(r) }, lp(top = 4))
             }
-            choice("Wyłączanie", listOf("none" to "Zwykłe", "math" to "Zadania matematyczne", "shake" to "Potrząsanie", "captcha" to "Przepisywanie"), a.challenge) { a.challenge = it }
+            choice("Wyłączanie", listOf("none" to "Prosty", "math" to "Liczby", "memory" to "Pamięć", "shake" to "Potrząsanie", "captcha" to "Przepisywanie"), a.challenge) { a.challenge = it }
             choice("Trudność / ile razy", listOf("1" to "Łatwo", "2" to "Średnio", "3" to "Trudno"), a.level.toString()) { a.level = it.toInt() }
             choice("Liczba zadań", listOf("1" to "1", "3" to "3", "5" to "5"), a.count.toString()) { a.count = it.toInt() }
             choice("Drzemka", listOf("5" to "5 min", "9" to "9 min", "10" to "10 min", "15" to "15 min", "20" to "20 min"), a.snooze.toString()) { a.snooze = it.toInt() }
@@ -526,6 +625,293 @@ class MainActivity : Activity() {
         if (u != null) pickedSound?.invoke(u.toString())
     }
 
+    // ================================================================== KALENDARZ I PRZYPOMNIENIA
+    private var calMode = "month"
+    private val calMonth: Calendar = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
+    private var calDay = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
+
+    private fun startOfDay(t: Long) = Calendar.getInstance().apply { timeInMillis = t; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
+
+    private fun weekStart(t: Long) = Calendar.getInstance().apply { timeInMillis = startOfDay(t); add(Calendar.DAY_OF_YEAR, -((get(Calendar.DAY_OF_WEEK) + 5) % 7)) }.timeInMillis
+
+    private fun renderCal() {
+        val mf = SimpleDateFormat("LLLL yyyy", Locale("pl"))
+        val top = hbox()
+        val title = when (calMode) {
+            "month" -> mf.format(calMonth.time)
+            "week" -> { val w = weekStart(calDay); SimpleDateFormat("d MMM", Locale("pl")).format(Date(w)) + " – " + SimpleDateFormat("d MMM", Locale("pl")).format(Date(w + 6 * 86_400_000L)) }
+            "day" -> SimpleDateFormat("EEEE, d MMMM", Locale("pl")).format(Date(calDay))
+            else -> "Najbliższe wpisy"
+        }.replaceFirstChar { it.uppercase() }
+        top.addView(tv("‹", 26f, true).apply { setPadding(0, 0, dp(14), 0); setOnClickListener { calMove(-1) } })
+        top.addView(tv(title, 21f, true), lp(0, -2, 1f))
+        top.addView(btn("Dziś") { calDay = startOfDay(System.currentTimeMillis()); calMonth.timeInMillis = calDay; calMonth.set(Calendar.DAY_OF_MONTH, 1); render() }, lp(-2, -2).apply { rightMargin = dp(8) })
+        top.addView(tv("›", 26f, true).apply { setPadding(dp(14), 0, 0, 0); setOnClickListener { calMove(1) } })
+        col.addView(top)
+        val mr = hbox()
+        for ((k, n) in listOf("month" to "Miesiąc", "week" to "Tydzień", "day" to "Dzień", "list" to "Lista")) mr.addView(btn(n, calMode == k) { calMode = k; render() }, lp(0, -2, 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        col.addView(mr, lp(top = 10))
+        val add = hbox()
+        for ((t, n) in Rem.TYPES) add.addView(btn("＋ " + n, t == "reminder") { newEv(t, if (calMode == "list") System.currentTimeMillis() + 3600_000L else calDay + 9 * 3600_000L) }, lp(-2, -2).apply { rightMargin = dp(6) })
+        col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(add) }, lp(top = 8))
+
+        when (calMode) {
+            "month" -> {
+                val mv = MonthView(this)
+                mv.month = calMonth.clone() as Calendar
+                mv.selected = calDay
+                mv.occ = Rem.range(this, mv.first(), mv.first() + 42 * 86_400_000L)
+                mv.onPick = { d -> calDay = d; render() }
+                mv.onLong = { d -> calDay = d; newEv("reminder", d + 9 * 3600_000L) }
+                mv.onSwipe = { calMove(it) }
+                col.addView(mv, lp(-1, dp(470), top = 10))
+                dayList(calDay)
+            }
+            "week", "day" -> {
+                val wv = WeekView(this)
+                wv.days = if (calMode == "week") 7 else 1
+                wv.start = if (calMode == "week") weekStart(calDay) else startOfDay(calDay)
+                wv.occ = Rem.range(this, wv.start, wv.start + wv.days * 86_400_000L)
+                wv.onEmpty = { t -> newEv("event", t) }
+                wv.onOcc = { o -> occSheet(o) }
+                wv.onSwipe = { calMove(it) }
+                col.addView(wv, lp(top = 10))
+                sv.post { sv.scrollTo(0, (wv.hourH * 7).toInt()) }
+            }
+            else -> agenda()
+        }
+    }
+
+    private fun calMove(d: Int) {
+        when (calMode) {
+            "month" -> { calMonth.add(Calendar.MONTH, d); calDay = startOfDay(calMonth.timeInMillis) }
+            "week" -> calDay += d * 7 * 86_400_000L
+            "day" -> calDay += d * 86_400_000L
+        }
+        if (calMode != "month") { calMonth.timeInMillis = calDay; calMonth.set(Calendar.DAY_OF_MONTH, 1) }
+        render()
+    }
+
+    private fun occRow(o: Occ): View {
+        val hf = SimpleDateFormat("H:mm", Locale("pl"))
+        val r = hbox().apply { setPadding(0, dp(9), 0, dp(9)) }
+        r.addView(View(this).apply { background = round(Rem.color(o.ev), 3) }, LinearLayout.LayoutParams(dp(5), dp(40)).apply { rightMargin = dp(12) })
+        val l = vbox()
+        l.addView(tv(Rem.typeIcon(o.ev.type) + " " + o.ev.title + (if (o.start in o.ev.done) "  ✓" else ""), 16f, true))
+        val sub = ArrayList<String>()
+        sub += if (o.ev.allDay) (if (o.end - o.start > 86_400_000L) "do " + SimpleDateFormat("d MMM", Locale("pl")).format(Date(o.end)) else "cały dzień") else hf.format(Date(o.start)) + if (o.end > o.start) "–" + hf.format(Date(o.end)) else ""
+        if (o.ev.type == "birthday") Rem.ageAt(o.ev, o.start).takeIf { it > 0 }?.let { sub += "kończy $it lat" }
+        Rem.repeatText(o.ev).takeIf { it.isNotEmpty() }?.let { sub += it }
+        if (o.ev.external) sub += "Kalendarz Google"
+        l.addView(tv(sub.joinToString(" · "), 12f, color = DIM))
+        r.addView(l, lp(0, -2, 1f))
+        r.setOnClickListener { occSheet(o) }
+        return r
+    }
+
+    private fun dayList(d: Long) {
+        header(SimpleDateFormat("EEEE, d MMMM", Locale("pl")).format(Date(d)))
+        val l = Rem.range(this, d, d + 86_400_000L)
+        if (l.isEmpty()) col.addView(tv("Nic zaplanowanego. Przytrzymaj dzień w kalendarzu, żeby szybko dodać.", 13f, color = DIM), lp(top = 4))
+        for (o in l) col.addView(occRow(o))
+    }
+
+    private fun agenda() {
+        val now = startOfDay(System.currentTimeMillis())
+        val l = Rem.range(this, now, now + 90L * 86_400_000L)
+        if (l.isEmpty()) col.addView(tv("Brak wpisów w najbliższych 90 dniach.", 14f, color = DIM), lp(top = 16))
+        val df = SimpleDateFormat("EEEE, d MMMM", Locale("pl"))
+        var last = -1L
+        for (o in l.sortedBy { it.start }.take(300)) {
+            val d = startOfDay(maxOf(o.start, now))
+            if (d != last) { header(if (d == now) "Dziś" else if (d == now + 86_400_000L) "Jutro" else df.format(Date(d))); last = d }
+            col.addView(occRow(o))
+        }
+    }
+
+    private fun occSheet(o: Occ) {
+        val e = o.ev
+        sheet(Rem.typeIcon(e.type) + " " + e.title) { c, d ->
+            val df = SimpleDateFormat(if (e.allDay) "EEEE, d MMMM yyyy" else "EEEE, d MMMM yyyy, H:mm", Locale("pl"))
+            c.addView(tv(df.format(Date(o.start)), 15f), lp(top = 6))
+            Rem.repeatText(e).takeIf { it.isNotEmpty() }?.let { c.addView(tv("Powtarza się: $it", 14f, color = DIM), lp(top = 4)) }
+            if (e.note.isNotBlank()) c.addView(tv(e.note, 14f), lp(top = 8))
+            if (e.external) {
+                c.addView(btn("Otwórz w Kalendarzu Google", true) {
+                    d.dismiss()
+                    try { startActivity(Intent(Intent.ACTION_VIEW).setData(android.content.ContentUris.withAppendedId(android.provider.CalendarContract.Events.CONTENT_URI, -e.id))) } catch (x: Exception) {}
+                }, lp(top = 12))
+                return@sheet
+            }
+            if (e.type == "reminder" && o.start !in e.done) c.addView(btn("✓ Zrobione", true) { Rem.done(this, e.id, o.start); d.dismiss(); render() }, lp(top = 12))
+            c.addView(btn("Edytuj") { d.dismiss(); evEdit(e) }, lp(top = 8))
+            c.addView(btn("Usuń") {
+                d.dismiss()
+                android.app.AlertDialog.Builder(this).setTitle("Usunąć „${e.title}”?").setMessage(if (e.repeat != "none") "Usunięte zostaną wszystkie powtórzenia." else null)
+                    .setPositiveButton("Usuń") { _, _ -> Rem.remove(this, e.id); render() }.setNegativeButton("Anuluj", null).show()
+            }, lp(top = 8))
+        }
+    }
+
+    private fun newEv(type: String, at: Long) {
+        val e = when (type) {
+            "birthday" -> Ev(type = "birthday", level = 2, start = startOfDay(at), end = startOfDay(at), allDay = true, repeat = "yearly", alerts = mutableListOf(0, 1440))
+            "trip" -> Ev(type = "trip", level = 2, start = startOfDay(at), end = startOfDay(at) + 3 * 86_400_000L, allDay = true, alerts = mutableListOf(1440, 10080))
+            "event" -> Ev(type = "event", start = at, end = at + 3600_000L, alerts = mutableListOf(30))
+            else -> Ev(type = "reminder", start = at, alerts = mutableListOf(0))
+        }
+        evEdit(e)
+    }
+
+    /** Edytor wpisu: rodzaj, ważność (kolor), data i godzina, powtarzanie, powiadomienia. */
+    private fun evEdit(e0: Ev) {
+        val e = Ev.of(e0.json())
+        sheet(if (e.id == 0L) "Nowy wpis" else "Edycja") { c, d ->
+            val title = EditText(this).apply { setText(e.title); hint = "Tytuł (np. Urodziny mamy, Leki, Wyjazd do Zakopanego)"; setTextColor(FG); setHintTextColor(DIM); background = round(BG, 14); setPadding(dp(12), dp(10), dp(12), dp(10)) }
+            c.addView(title, lp(top = 8))
+            fun chips(label: String, opts: List<Pair<String, String>>, cur: () -> String, colorOf: (String) -> Int? = { null }, set: (String) -> Unit): LinearLayout {
+                c.addView(tv(label, 13f, color = DIM), lp(top = 12))
+                val r = hbox()
+                fun draw() {
+                    r.removeAllViews()
+                    for ((k, n) in opts) {
+                        val on = cur() == k
+                        val col = colorOf(k)
+                        r.addView(tv(n, 13f, on, if (on) Theme.onAccent else FG).apply {
+                            background = if (on) (if (col != null) round(col, 14) else Theme.gradient(dp(14).toFloat())) else round(BG, 14, 1)
+                            if (!on && col != null) setTextColor(col)
+                            setPadding(dp(12), dp(7), dp(12), dp(7)); setOnClickListener { set(k); draw() }
+                        }, lp(-2, -2).apply { rightMargin = dp(6) })
+                    }
+                }
+                draw()
+                c.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(r) }, lp(top = 4))
+                return r
+            }
+            chips("Rodzaj", Rem.TYPES, { e.type }) { e.type = it; if (it == "birthday") { e.allDay = true; e.repeat = "yearly" }; if (it == "trip") e.allDay = true }
+            chips("Ważność", Rem.LEVELS.mapIndexed { i, p -> i.toString() to p.first }, { e.level.toString() }, { Rem.LEVELS[it.toInt()].second }) { e.level = it.toInt() }
+
+            // data i godzina
+            val df = SimpleDateFormat("EEE, d MMM yyyy", Locale("pl")); val hf = SimpleDateFormat("H:mm", Locale("pl"))
+            val whenR = hbox()
+            val dBtn = btn(df.format(Date(e.start))) {}
+            val tBtn = btn(hf.format(Date(e.start))) {}
+            val eBtn = btn("do " + df.format(Date(maxOf(e.end, e.start)))) {}
+            fun refresh() {
+                dBtn.text = df.format(Date(e.start)); tBtn.text = hf.format(Date(e.start)); eBtn.text = "do " + df.format(Date(maxOf(e.end, e.start)))
+                tBtn.visibility = if (e.allDay) View.GONE else View.VISIBLE
+                eBtn.visibility = if (e.type == "trip" || e.type == "event") View.VISIBLE else View.GONE
+            }
+            dBtn.setOnClickListener {
+                val cal = Calendar.getInstance().apply { timeInMillis = e.start }
+                android.app.DatePickerDialog(this, { _, y, m, dd ->
+                    val dur = e.duration
+                    cal.set(y, m, dd); e.start = cal.timeInMillis; e.end = e.start + dur; refresh()
+                }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+            }
+            tBtn.setOnClickListener {
+                val cal = Calendar.getInstance().apply { timeInMillis = e.start }
+                android.app.TimePickerDialog(this, { _, hh, mm ->
+                    val dur = e.duration
+                    cal.set(Calendar.HOUR_OF_DAY, hh); cal.set(Calendar.MINUTE, mm); e.start = cal.timeInMillis; e.end = e.start + dur; refresh()
+                }, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), true).show()
+            }
+            eBtn.setOnClickListener {
+                val cal = Calendar.getInstance().apply { timeInMillis = maxOf(e.end, e.start) }
+                android.app.DatePickerDialog(this, { _, y, m, dd ->
+                    cal.set(y, m, dd)
+                    if (!e.allDay) { val s0 = Calendar.getInstance().apply { timeInMillis = e.start }; cal.set(Calendar.HOUR_OF_DAY, s0.get(Calendar.HOUR_OF_DAY) + 1) }
+                    e.end = maxOf(cal.timeInMillis, e.start); refresh()
+                }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+            }
+            whenR.addView(dBtn, lp(-2, -2).apply { rightMargin = dp(6) }); whenR.addView(tBtn, lp(-2, -2).apply { rightMargin = dp(6) }); whenR.addView(eBtn)
+            c.addView(tv("Kiedy", 13f, color = DIM), lp(top = 12))
+            c.addView(HorizontalScrollView(this).apply { addView(whenR) }, lp(top = 4))
+            val adR = hbox().apply { setPadding(0, dp(6), 0, dp(6)) }
+            adR.addView(tv("Cały dzień", 15f), lp(0, -2, 1f))
+            adR.addView(Switch(this).apply { isChecked = e.allDay; setOnCheckedChangeListener { _, b -> e.allDay = b; refresh() } })
+            c.addView(adR)
+            refresh()
+
+            // powtarzanie
+            val params = vbox()
+            fun drawParams() {
+                params.removeAllViews()
+                fun stepper(label: String, v: () -> Int, min: Int, max: Int, set: (Int) -> Unit, unit: String) {
+                    val r = hbox().apply { setPadding(0, dp(4), 0, dp(4)) }
+                    r.addView(tv(label, 14f), lp(0, -2, 1f))
+                    val vt = tv("${v()} $unit", 14f, true)
+                    r.addView(btn("−") { set((v() - 1).coerceAtLeast(min)); vt.text = "${v()} $unit" }, lp(-2, -2).apply { rightMargin = dp(6) })
+                    r.addView(vt, lp(-2, -2).apply { rightMargin = dp(6) })
+                    r.addView(btn("+") { set((v() + 1).coerceAtMost(max)); vt.text = "${v()} $unit" })
+                    params.addView(r)
+                }
+                when (e.repeat) {
+                    "hourly" -> {
+                        stepper("Co ile godzin", { e.every }, 1, 12, { e.every = it }, "h")
+                        stepper("Od godziny", { e.fromH }, 0, 23, { e.fromH = it }, ":00")
+                        stepper("Do godziny", { e.toH }, 0, 23, { e.toH = it }, ":00")
+                    }
+                    "daily" -> stepper("Co ile dni", { e.every }, 1, 30, { e.every = it }, "dni")
+                    "monthly" -> stepper("Co ile miesięcy", { e.every }, 1, 12, { e.every = it }, "mies.")
+                    "weekly" -> stepper("Co ile tygodni", { e.every }, 1, 8, { e.every = it }, "tyg.")
+                }
+                if (e.repeat == "weekly" || e.repeat == "hourly") {
+                    val dr = hbox()
+                    val names = listOf("pn", "wt", "śr", "cz", "pt", "sb", "nd")
+                    fun drawDays() {
+                        dr.removeAllViews()
+                        for (i in 0..6) {
+                            val on = e.days and (1 shl i) != 0
+                            dr.addView(tv(names[i], 13f, on, if (on) Theme.onAccent else FG).apply {
+                                gravity = Gravity.CENTER; background = if (on) Theme.gradient(dp(14).toFloat()) else round(BG, 14, 1); setPadding(0, dp(7), 0, dp(7))
+                                setOnClickListener { e.days = e.days xor (1 shl i); drawDays() }
+                            }, lp(0, -2, 1f).apply { rightMargin = dp(3) })
+                        }
+                    }
+                    drawDays()
+                    params.addView(tv(if (e.repeat == "hourly") "W które dni (puste = codziennie)" else "W które dni", 12f, color = DIM), lp(top = 4))
+                    params.addView(dr, lp(top = 4))
+                }
+            }
+            chips("Powtarzaj", listOf("none" to "Nie", "hourly" to "Co kilka godzin", "daily" to "Codziennie", "weekly" to "Co tydzień", "monthly" to "Co miesiąc", "yearly" to "Co rok"), { e.repeat }) {
+                e.repeat = it; if (e.every < 1) e.every = 1; drawParams()
+            }
+            c.addView(params)
+            drawParams()
+
+            // powiadomienia (kilka naraz)
+            c.addView(tv("Powiadom", 13f, color = DIM), lp(top = 12))
+            val ar = hbox()
+            fun drawAl() {
+                ar.removeAllViews()
+                for ((m, n) in Rem.ALERTS) {
+                    val on = m in e.alerts
+                    ar.addView(tv(if (m == 0) n else "$n przed", 13f, on, if (on) Theme.onAccent else FG).apply {
+                        background = if (on) Theme.gradient(dp(14).toFloat()) else round(BG, 14, 1); setPadding(dp(12), dp(7), dp(12), dp(7))
+                        setOnClickListener { if (on) e.alerts.remove(m) else e.alerts.add(m); drawAl() }
+                    }, lp(-2, -2).apply { rightMargin = dp(6) })
+                }
+            }
+            drawAl()
+            c.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(ar) }, lp(top = 4))
+
+            val note = EditText(this).apply { setText(e.note); hint = "Notatka (miejsce, szczegóły)"; setTextColor(FG); setHintTextColor(DIM); background = round(BG, 14); setPadding(dp(12), dp(10), dp(12), dp(10)) }
+            c.addView(note, lp(top = 12))
+            val br = hbox()
+            br.addView(btn("Zapisz", true) {
+                e.title = title.text.toString().trim().ifEmpty { Rem.TYPES.first { it.first == e.type }.second }
+                e.note = note.text.toString().trim()
+                if (e.allDay) { e.start = startOfDay(e.start); if (e.end < e.start) e.end = e.start }
+                Rem.put(this, e); d.dismiss()
+                calDay = startOfDay(e.start); calMonth.timeInMillis = calDay; calMonth.set(Calendar.DAY_OF_MONTH, 1)
+                if (tab != "cal") toast("Zapisano w kalendarzu") else render()
+            }, lp(0, -2, 1f).apply { rightMargin = dp(8) })
+            if (e.id != 0L) br.addView(btn("Usuń") { Rem.remove(this, e.id); d.dismiss(); render() }, lp(0, -2, 1f))
+            c.addView(br, lp(top = 14))
+        }
+    }
+
     // ================================================================== MINUTNIK I STOPER
     private var swStart = 0L
     private var swAcc = 0L
@@ -549,7 +935,6 @@ class MainActivity : Activity() {
     private fun swFmt(ms: Long) = "%d:%02d,%d".format(ms / 60000, ms / 1000 % 60, ms / 100 % 10)
 
     private fun renderTimer() {
-        col.addView(tv("Minutnik", 32f, true))
         val end = pr().getLong("timerEnd", 0)
         val running = end > System.currentTimeMillis()
         val tl = tv(fmt(if (running) (end - System.currentTimeMillis()) / 1000 else timerSet.toLong()), 56f, true).apply { gravity = Gravity.CENTER }
@@ -572,8 +957,10 @@ class MainActivity : Activity() {
             col.addView(adj, lp(top = 8))
             col.addView(btn("Start", true) { pr().edit().putInt("timerTotal", timerSet).apply(); Alarms.startTimer(this, timerSet); render() }, lp(top = 10))
         } else col.addView(btn("Zatrzymaj") { Alarms.stopTimer(this); render() }, lp(top = 10))
+        h.post(tick)
+    }
 
-        header("Stoper")
+    private fun renderWatch() {
         val sl = tv(swFmt(swAcc), 52f, true).apply { gravity = Gravity.CENTER }
         swLabel = sl
         col.addView(sl, lp(top = 6))
@@ -624,6 +1011,22 @@ class MainActivity : Activity() {
         val mr2 = hbox()
         for ((k, n) in Theme.MODES) mr2.addView(btn(n, (pr().getString("mode", "system") ?: "system") == k) { pr().edit().putString("mode", k).apply(); applyTheme(); render() }, lp(-2, -2).apply { rightMargin = dp(6) })
         col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(mr2) }, lp(top = 4))
+
+        header("Kalendarz i przypomnienia")
+        toggle("Pokazuj Kalendarz Google", "Wydarzenia z kalendarzy na telefonie (tylko do odczytu)", pr().getBoolean("sysCal", true)) {
+            pr().edit().putBoolean("sysCal", it).apply()
+            if (it && checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.READ_CALENDAR), 2)
+        }
+        col.addView(btn("Importuj urodziny z kontaktów") {
+            if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), 3); return@btn }
+            Thread { val n = Rem.importBirthdays(this); h.post { toast(if (n > 0) "Dodano urodziny: $n" else "Brak nowych urodzin w kontaktach") } }.start()
+        }, lp(-2, -2, top = 6))
+        val adr = hbox()
+        adr.addView(tv("Wpisy całodniowe przypominaj o", 14f), lp(0, -2, 1f))
+        for (hh in listOf(7, 8, 9, 10)) adr.addView(btn("$hh:00", pr().getInt("allDayAt", 9) == hh) { pr().edit().putInt("allDayAt", hh).apply(); Rem.schedule(this); render() }, lp(-2, -2).apply { leftMargin = dp(4) })
+        col.addView(adr, lp(top = 8))
+        toggle("„Mój dzień” po wyłączeniu budzika", "Pogoda, dzisiejsze wpisy i urodziny zaraz po wstaniu", pr().getBoolean("myDay", true)) { pr().edit().putBoolean("myDay", it).apply() }
+        col.addView(btn("Pora snu…") { sleepSheet() }, lp(-2, -2, top = 6))
 
         header("Widżety")
         val ws = pr().getString("widgetStyle", if (pr().getBoolean("widgetLight", false)) "light" else "weather") ?: "weather"

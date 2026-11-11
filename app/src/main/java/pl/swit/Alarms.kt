@@ -72,6 +72,7 @@ object Alarms {
     fun save(c: Context, l: List<Alarm>) {
         Prefs.get(c).edit().putString("alarms", JSONArray(l.map { it.json() }).toString()).apply()
         scheduleAll(c)
+        Rem.scheduleBedtime(c)
         Widgets.updateAll(c)
     }
 
@@ -203,7 +204,7 @@ class AlarmReceiver : BroadcastReceiver() {
         val id = i.getIntExtra("id", 0)
         when (i.action) {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> {
-                Alarms.scheduleAll(c); Notify.schedule(c); Widgets.updateAll(c)
+                Alarms.scheduleAll(c); Notify.schedule(c); Rem.schedule(c); Widgets.updateAll(c)
             }
             "FIRE" -> Ring.start(c, id, "alarm")
             "PRE" -> Ring.start(c, id, "pre")
@@ -214,6 +215,13 @@ class AlarmReceiver : BroadcastReceiver() {
             "DISMISS" -> { c.stopService(Intent(c, Ring::class.java)); if (i.getStringExtra("kind") == "alarm") Alarms.dismissed(c, id) }
             "SNOOZE" -> { c.stopService(Intent(c, Ring::class.java)); val a = Alarms.get(c, id); Alarms.snooze(c, id, a?.snooze ?: 9) }
             "TICK" -> { val pr = goAsync(); Thread { try { Notify.tick(c); Widgets.updateAll(c) } catch (e: Exception) {}; pr.finish() }.start() }
+            "REM" -> { val pr = goAsync(); Thread { try { Rem.fire(c) } catch (e: Exception) {}; pr.finish() }.start() }
+            "REMDONE" -> { Rem.done(c, i.getLongExtra("ev", 0), i.getLongExtra("occ", 0)); c.getSystemService(NotificationManager::class.java)?.cancel(i.getIntExtra("nid", 0)) }
+            "REMSNOOZE", "REMSNOOZE60" -> {
+                Rem.snooze(c, i.getLongExtra("ev", 0), if (i.action == "REMSNOOZE") 10 else 60)
+                c.getSystemService(NotificationManager::class.java)?.cancel(i.getIntExtra("nid", 0))
+            }
+            "BEDTIME" -> Rem.bedNotify(c)
             "NAP" -> { Alarms.nap(c, i.getIntExtra("min", 20)); android.widget.Toast.makeText(c, "Drzemka: budzik za ${i.getIntExtra("min", 20)} min", android.widget.Toast.LENGTH_SHORT).show() }
         }
     }
