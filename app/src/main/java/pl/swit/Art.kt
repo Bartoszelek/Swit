@@ -76,16 +76,19 @@ object Art {
     // ------------------------------------------------------------ kolorowe ikony (rysowane, ostre w każdym rozmiarze)
     private val cache = LruCache<String, Bitmap>(80)
 
-    fun icon(code: Int, day: Boolean, px: Int): Bitmap {
-        val key = "$code-$day-$px"
+    fun icon(code: Int, day: Boolean, px: Int, onLight: Boolean = false): Bitmap {
+        val key = "$code-$day-$px-$onLight"
         cache.get(key)?.let { return it }
         val b = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        lightBg = onLight
         drawIcon(Canvas(b), scene(code), day, px.toFloat(), code >= 96)
+        lightBg = false
         cache.put(key, b)
         return b
     }
 
     private val P = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var lightBg = false
 
     private fun sun(c: Canvas, cx: Float, cy: Float, r: Float) {
         P.reset(); P.isAntiAlias = true
@@ -122,7 +125,10 @@ object Art {
     }
 
     private fun drawIcon(c: Canvas, s: Scene, day: Boolean, z: Float, hail: Boolean) {
-        val white = 0xFFFFFFFF.toInt(); val light = 0xFFE3E8EF.toInt(); val grey = 0xFFB8C2CE.toInt()
+        // na jasnym tle chmury muszą być szare, inaczej znikają
+        val white = if (lightBg) 0xFFC9D2DC.toInt() else 0xFFFFFFFF.toInt()
+        val light = if (lightBg) 0xFFA7B3C1.toInt() else 0xFFE3E8EF.toInt()
+        val grey = if (lightBg) 0xFF7E8B9A.toInt() else 0xFFB8C2CE.toInt()
         val storm1 = 0xFF9AA3B2.toInt(); val storm2 = 0xFF5D6676.toInt()
         when (s) {
             Scene.CLEAR -> if (day) sun(c, z / 2, z / 2, z * 0.26f) else moon(c, z / 2, z / 2, z * 0.27f)

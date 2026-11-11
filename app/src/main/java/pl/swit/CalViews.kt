@@ -69,6 +69,7 @@ class MonthView(c: Context) : View(c) {
         val today = dayStart(System.currentTimeMillis())
         val m = month.get(Calendar.MONTH)
         val cal = Calendar.getInstance()
+        val texts = ArrayList<Triple<String, Float, Float>>()   // napisy rysowane na końcu, nad paskami
         for (i in 0 until 42) {
             val d = cellDay(i)
             cal.timeInMillis = d
@@ -88,6 +89,7 @@ class MonthView(c: Context) : View(c) {
             p.isFakeBoldText = false
             // wpisy
             val dayOcc = occ.filter { it.start < d + 86_400_000L && maxOf(it.end, it.start + 1) > d }
+                .sortedWith(compareByDescending<Occ> { it.end - it.start >= 86_400_000L }.thenBy { it.start }.thenBy { it.ev.title })
             var k = 0
             val lineH = 13.5f * dp
             for (o in dayOcc) {
@@ -97,16 +99,26 @@ class MonthView(c: Context) : View(c) {
                     cv.drawText("+${dayOcc.size - k}", x + cw / 2, y + ch - 4 * dp, p); break
                 }
                 val col = Rem.color(o.ev)
+                // wpis kilkudniowy: pasek ciągnie się przez kolejne dni, napis tylko na początku (lub w poniedziałek)
+                val fromPrev = o.start < d
+                val toNext = maxOf(o.end, o.start + 1) > d + 86_400_000L
                 p.color = Theme.withAlpha(col, if (inMonth) 0.9f else 0.4f)
-                cv.drawRoundRect(x + 2, yy, x + cw - 2, yy + lineH - 2, 4 * dp, 4 * dp, p)
-                p.color = Color.WHITE; p.textSize = 9.5f * dp; p.textAlign = Paint.Align.LEFT
-                val t = o.ev.title
-                val n = p.breakText(t, true, cw - 8, null)
-                cv.drawText(t.substring(0, n), x + 5, yy + lineH - 5.5f * dp, p)
+                val l0 = if (fromPrev) x else x + 2; val r0 = if (toNext) x + cw else x + cw - 2
+                cv.drawRoundRect(l0, yy, r0, yy + lineH - 2, if (fromPrev && toNext) 0f else 4 * dp, 4 * dp, p)
+                if (!fromPrev || i % 7 == 0) {
+                    p.color = Color.WHITE; p.textSize = 9.5f * dp; p.textAlign = Paint.Align.LEFT
+                    val t = o.ev.title
+                    val span = if (toNext) cw * (7 - i % 7) else cw
+                    val n = p.breakText(t, true, span - 8, null)
+                    texts.add(Triple(t.substring(0, n), l0 + 4, yy + lineH - 5.5f * dp))
+                }
                 p.textAlign = Paint.Align.CENTER
                 k++
             }
         }
+        p.color = Color.WHITE; p.textSize = 9.5f * dp; p.textAlign = Paint.Align.LEFT
+        for ((t, x, y) in texts) cv.drawText(t, x, y, p)
+        p.textAlign = Paint.Align.CENTER
     }
 }
 

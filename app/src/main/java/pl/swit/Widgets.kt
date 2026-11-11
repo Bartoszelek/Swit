@@ -17,7 +17,7 @@ import java.util.Locale
 
 /** Wspólna logika widżetów: każdy widżet ma 6 układów i sam dobiera właściwy do swojego rozmiaru. */
 object Widgets {
-    private val WEATHER = listOf(WWeather1::class.java, WWeather2::class.java, WWeather::class.java, WClock::class.java, WForecast::class.java, WForecast3::class.java)
+    private val WEATHER = listOf(WWeather1::class.java, WWeather2::class.java, WWeather::class.java, WClock::class.java, WForecast::class.java, WForecast3::class.java, WForecast4::class.java)
     private val ALARM = listOf(WAlarm1::class.java, WAlarm2::class.java)
 
     /** Styl widżetów: weather (kolor nieba wg pogody), dark, light, glass. */
@@ -30,6 +30,7 @@ object Widgets {
 
     fun updateAll(c: Context) {
         val m = AppWidgetManager.getInstance(c)
+        m.getAppWidgetIds(ComponentName(c, WMinimal::class.java)).takeIf { it.isNotEmpty() }?.let { minimal(c, m, it) }
         for (cls in WEATHER + ALARM) {
             val ids = m.getAppWidgetIds(ComponentName(c, cls))
             if (ids.isNotEmpty()) update(c, m, ids, cls in ALARM)
@@ -47,7 +48,8 @@ object Widgets {
                     SizeF(110f, 100f) to weatherView(c, R.layout.wg_2x2, f),
                     SizeF(240f, 40f) to weatherView(c, R.layout.wg_4x1, f),
                     SizeF(240f, 100f) to weatherView(c, R.layout.wg_4x2, f),
-                    SizeF(240f, 170f) to weatherView(c, R.layout.wg_4x3, f)))
+                    SizeF(240f, 190f) to weatherView(c, R.layout.wg_4x3, f),
+                    SizeF(240f, 280f) to weatherView(c, R.layout.wg_4x4, f)))
             } else if (alarm) alarmView(c, R.layout.wa_2x1) else weatherView(c, R.layout.wg_2x2, f)
             m.updateAppWidget(id, rv)
         }
@@ -91,52 +93,78 @@ object Widgets {
 
     private fun weatherView(c: Context, layout: Int, f: Forecast?): RemoteViews {
         val rv = base(c, layout, "weather", f)
+        val lt = light(c)
+        val big = layout in listOf(R.layout.wg_4x2, R.layout.wg_4x3, R.layout.wg_4x4)
+        // zegar i data są we wszystkich układach
+        rv.setTextColor(R.id.w_clock, fg(c))
+        if (layout != R.layout.wg_1x1) rv.setTextColor(R.id.w_date, fg(c))
         if (f == null) {
             text(rv, c, R.id.w_temp, "--°")
-            if (layout != R.layout.wg_1x1) try { text(rv, c, R.id.w_desc, "Otwórz Świt") } catch (e: Exception) {}
-            icon(rv, c, R.id.w_icon, R.drawable.w_cloud)
+            rv.setImageViewBitmap(R.id.w_icon, Art.icon(3, true, 160, lt))
+            if (layout != R.layout.wg_1x1 && layout != R.layout.wg_2x1) text(rv, c, R.id.w_desc, "Otwórz Świt")
             return rv
         }
-        wicon(rv, R.id.w_icon, f.code, f.day, 160)
+        rv.setImageViewBitmap(R.id.w_icon, Art.icon(f.code, f.day, if (big) 200 else 150, lt))
         text(rv, c, R.id.w_temp, Weather.deg(f.temp))
         val d = f.days.firstOrNull()
-        when (layout) {
-            R.layout.wg_2x1 -> { text(rv, c, R.id.w_desc, Weather.text(f.code)); text(rv, c, R.id.w_place, f.place.name) }
-            R.layout.wg_2x2 -> {
-                text(rv, c, R.id.w_place, f.place.name); text(rv, c, R.id.w_desc, Weather.text(f.code))
-                text(rv, c, R.id.w_hilo, if (d != null) "↑${Weather.deg(d.max)} ↓${Weather.deg(d.min)}" + (if (d.pop >= 20) " · ☂${d.pop}%" else "") else "")
+        if (layout == R.layout.wg_2x2) {
+            text(rv, c, R.id.w_desc, Weather.text(f.code))
+            text(rv, c, R.id.w_hilo, if (d != null) "↑${Weather.deg(d.max)}  ↓${Weather.deg(d.min)}" else "")
+        }
+        if (layout == R.layout.wg_4x1) text(rv, c, R.id.w_desc, Weather.text(f.code) + if (d != null) " · ${Weather.deg(d.max)}/${Weather.deg(d.min)}" else "")
+        if (big) {
+            text(rv, c, R.id.w_desc, Weather.text(f.code))
+            text(rv, c, R.id.w_place, f.place.name)
+            text(rv, c, R.id.w_alarm, alarmLine(c))
+            val nc = Weather.nowcast(f)
+            text(rv, c, R.id.w_now, listOfNotNull(
+                d?.let { "↑${Weather.deg(it.max)} ↓${Weather.deg(it.min)}" }, "odczuwalna ${Weather.deg(f.feels)}",
+                if (nc.startsWith("Za ok.") || nc.startsWith("Pada") || nc.startsWith("Przestanie")) "☂ " + nc.lowercase() else d?.takeIf { it.pop >= 20 }?.let { "☂ ${it.pop}%" }).joinToString("  ·  "))
+        }
+        if (layout == R.layout.wg_4x3 || layout == R.layout.wg_4x4) {
+            rv.removeAllViews(R.id.w_hours)
+            val hf = SimpleDateFormat("H:mm", Locale("pl"))
+            for ((i, h) in f.hours.drop(1).take(6).withIndex()) {
+                val cell = RemoteViews(c.packageName, R.layout.wg_cell)
+                text(cell, c, R.id.c_top, if (i == 0) "za 1 h" else hf.format(Date(h.t)))
+                cell.setImageViewBitmap(R.id.c_icon, Art.icon(h.code, h.day, 84, lt))
+                text(cell, c, R.id.c_bot, Weather.deg(h.temp))
+                rv.addView(R.id.w_hours, cell)
             }
-            R.layout.wg_4x1 -> {
-                text(rv, c, R.id.w_desc, Weather.text(f.code)); text(rv, c, R.id.w_alarm, alarmLine(c))
-                rv.setTextColor(R.id.w_clock, fg(c)); rv.setTextColor(R.id.w_date, fg(c))
-            }
-            R.layout.wg_4x2, R.layout.wg_4x3 -> {
-                text(rv, c, R.id.w_desc, Weather.text(f.code)); text(rv, c, R.id.w_place, f.place.name); text(rv, c, R.id.w_alarm, alarmLine(c))
-                rv.setTextColor(R.id.w_clock, fg(c)); rv.setTextColor(R.id.w_date, fg(c))
-                rv.removeAllViews(R.id.w_days)
-                val dn = SimpleDateFormat("EEE", Locale("pl"))
-                for ((i, day) in f.days.take(5).withIndex()) {
-                    val cell = RemoteViews(c.packageName, R.layout.wg_cell)
-                    text(cell, c, R.id.c_top, if (i == 0) "dziś" else dn.format(Date(day.t)))
-                    wicon(cell, R.id.c_icon, day.code, true, 72)
-                    text(cell, c, R.id.c_bot, "${Weather.deg(day.max)} ${Weather.deg(day.min)}")
-                    rv.addView(R.id.w_days, cell)
-                }
-                if (layout == R.layout.wg_4x3) {
-                    text(rv, c, R.id.w_now, Weather.nowcast(f).ifEmpty { Weather.summary(f) })
-                    rv.removeAllViews(R.id.w_hours)
-                    val hf = SimpleDateFormat("H:mm", Locale("pl"))
-                    for (h in f.hours.filterIndexed { i, _ -> i % 2 == 1 }.take(6)) {
-                        val cell = RemoteViews(c.packageName, R.layout.wg_cell)
-                        text(cell, c, R.id.c_top, hf.format(Date(h.t)))
-                        wicon(cell, R.id.c_icon, h.code, h.day, 72)
-                        text(cell, c, R.id.c_bot, Weather.deg(h.temp) + if (h.pop >= 30) " ${h.pop}%" else "")
-                        rv.addView(R.id.w_hours, cell)
-                    }
-                }
+        }
+        if (layout == R.layout.wg_4x4) {
+            rv.removeAllViews(R.id.w_days)
+            rv.setInt(R.id.w_sep, "setBackgroundColor", if (lt) 0x22000000 else 0x33FFFFFF)
+            val dn = SimpleDateFormat("EEE", Locale("pl"))
+            for ((i, day) in f.days.take(5).withIndex()) {
+                val cell = RemoteViews(c.packageName, R.layout.wg_cell)
+                text(cell, c, R.id.c_top, if (i == 0) "dziś" else dn.format(Date(day.t)))
+                cell.setImageViewBitmap(R.id.c_icon, Art.icon(day.code, true, 84, lt))
+                text(cell, c, R.id.c_bot, "${Weather.deg(day.max)} ${Weather.deg(day.min)}")
+                rv.addView(R.id.w_days, cell)
             }
         }
         return rv
+    }
+
+    /** Minimalistyczny: przezroczyste tło, duży zegar, pod nim data i pogoda. */
+    fun minimal(c: Context, m: AppWidgetManager, ids: IntArray) {
+        val f = Weather.cached(c)
+        for (id in ids) {
+            val rv = RemoteViews(c.packageName, R.layout.wg_mini)
+            rv.setOnClickPendingIntent(R.id.w_root, open(c, "weather"))
+            if (f != null) {
+                rv.setImageViewBitmap(R.id.w_icon, Art.icon(f.code, f.day, 110))
+                rv.setTextViewText(R.id.w_temp, Weather.deg(f.temp))
+                rv.setTextViewText(R.id.w_desc, Weather.text(f.code))
+                val d = f.days.firstOrNull()
+                val nc = Weather.nowcast(f)
+                rv.setTextViewText(R.id.w_now, listOfNotNull(d?.let { "↑${Weather.deg(it.max)}  ↓${Weather.deg(it.min)}" },
+                    if (nc.startsWith("Za ok.") || nc.startsWith("Przestanie")) "☂ " + nc.lowercase() else null,
+                    Alarms.nextAny(c)?.let { "⏰ ${it.first.time()}" }).joinToString("   ·   "))
+            } else rv.setTextViewText(R.id.w_temp, "--°")
+            m.updateAppWidget(id, rv)
+        }
     }
 
     private fun alarmView(c: Context, layout: Int): RemoteViews {
@@ -174,5 +202,15 @@ class WWeather : BaseWidget(false)
 class WClock : BaseWidget(false)
 class WForecast : BaseWidget(false)
 class WForecast3 : BaseWidget(false)
+class WForecast4 : BaseWidget(false)
 class WAlarm1 : BaseWidget(true)
 class WAlarm2 : BaseWidget(true)
+
+class WMinimal : AppWidgetProvider() {
+    override fun onUpdate(c: Context, m: AppWidgetManager, ids: IntArray) {
+        Widgets.minimal(c, m, ids)
+        if (Weather.cached(c) == null) Thread { try { Weather.refresh(c); Widgets.updateAll(c) } catch (e: Exception) {} }.start()
+    }
+
+    override fun onEnabled(c: Context) { Notify.schedule(c) }
+}

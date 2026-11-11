@@ -55,6 +55,11 @@ object Weather {
 
     fun select(c: Context, i: Int) = Prefs.get(c).edit().putInt("place", i).apply()
 
+    fun key(p: Place) = if (p.gps) "gps" else "%.2f,%.2f".format(Locale.US, p.lat, p.lon)
+
+    /** Ostatnia znana pogoda danego miejsca: (temperatura, kod, dzień, nazwa) – do listy miejsc. */
+    fun mini(c: Context, p: Place): List<String>? = Prefs.get(c).getString("mini_" + key(p), null)?.split('|')?.takeIf { it.size >= 3 }
+
     /** Wyszukiwanie miejscowości (po polsku). */
     fun search(q: String): List<Place> {
         val js = JSONObject(get("https://geocoding-api.open-meteo.com/v1/search?count=10&language=pl&name=" + URLEncoder.encode(q, "UTF-8")))
@@ -112,7 +117,9 @@ object Weather {
         } catch (e: Exception) { JSONObject() }
         val o = JSONObject().put("place", p.json()).put("at", System.currentTimeMillis()).put("f", f).put("aq", aq)
         cacheFile(c).writeText(o.toString())
-        return parse(o)
+        val fc = parse(o)
+        Prefs.get(c).edit().putString("mini_" + key(current(c)), "${fc.temp}|${fc.code}|${fc.day}|${p.name}").apply()
+        return fc
     }
 
     /** Ostatnia zapisana prognoza (bez internetu). */

@@ -211,7 +211,18 @@ class MainActivity : Activity() {
         val places = Weather.places(this)
         val cur = Weather.current(this)
         val top = hbox()
-        top.addView(tv("📍 " + (forecast?.place?.name?.takeIf { cur.gps } ?: cur.name), 17f, true).apply { setOnClickListener { placesSheet() } }, lp(0, -2, 1f))
+        top.addView(tv("☰", 26f, true).apply { setPadding(dp(2), 0, dp(14), 0); setOnClickListener { drawer() } })
+        val names = vbox()
+        names.addView(tv((if (cur.gps) "📍 " else "") + (forecast?.place?.name?.takeIf { cur.gps } ?: cur.name), 19f, true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+        if (places.size > 1) {
+            // kropki jak w aplikacjach pogodowych – które miejsce z ilu
+            val dots = hbox().apply { setPadding(0, dp(4), 0, 0) }
+            val sel = pr().getInt("place", 0)
+            for (i in places.indices) dots.addView(View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (i == sel) FG else Theme.withAlpha(FG, 0.3f)) } },
+                LinearLayout.LayoutParams(dp(6), dp(6)).apply { rightMargin = dp(5) })
+            names.addView(dots)
+        }
+        top.addView(names, lp(0, -2, 1f))
         top.addView(btn(if (loading) "…" else "↻") { load(true) })
         col.addView(top)
         val f = forecast
@@ -237,6 +248,16 @@ class MainActivity : Activity() {
         nowR.addView(wicon(f.code, f.day, 96))
         hc.addView(nowR)
         hero.addView(hc)
+        // przesunięcie palcem po karcie pogody = następne / poprzednie miejsce
+        val gd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: android.view.MotionEvent) = true
+            override fun onFling(e1: android.view.MotionEvent?, e2: android.view.MotionEvent, vx: Float, vy: Float): Boolean {
+                if (Math.abs(vx) < Math.abs(vy) || Math.abs(vx) < 500 || places.size < 2) return false
+                val n = (pr().getInt("place", 0) + (if (vx < 0) 1 else -1) + places.size) % places.size
+                switchPlace(n); return true
+            }
+        })
+        hero.setOnTouchListener { _, e -> gd.onTouchEvent(e) }
         col.addView(hero, lp(-1, dp(230), top = 12))
         val nc = Weather.nowcast(f)
         if (nc.isNotEmpty()) col.addView(tv("☂ $nc", 15f, true), lp(top = 10))
@@ -347,6 +368,85 @@ class MainActivity : Activity() {
         box.addView(btn("Zamknij") { d.dismiss() })
         box.addView(w, LinearLayout.LayoutParams(-1, 0, 1f))
         d.setContentView(box); d.show()
+    }
+
+    private fun switchPlace(i: Int) {
+        Weather.select(this, i)
+        forecast = null
+        load(false)
+        render()
+    }
+
+    /** Szuflada miejsc (☰): lista z ostatnią temperaturą, dodawanie, usuwanie, wybór. */
+    private fun drawer() {
+        val d = Dialog(this, android.R.style.Theme_Material_NoActionBar)
+        val panel = vbox().apply { setBackgroundColor(SURF); setPadding(dp(18), dp(36), dp(18), dp(18)) }
+        val w = (resources.displayMetrics.widthPixels * 0.84f).toInt()
+        val scroll = ScrollView(this).apply { addView(panel) }
+        d.setContentView(scroll)
+        d.window?.apply {
+            setLayout(w, -1); setGravity(Gravity.START)
+            setBackgroundDrawable(ColorDrawable(SURF))
+            setWindowAnimations(android.R.style.Animation_Translucent)
+            setDimAmount(0.5f); addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        }
+        fun fill() {
+            panel.removeAllViews()
+            panel.addView(tv("Miejsca", 24f, true))
+            val l = Weather.places(this)
+            val sel = pr().getInt("place", 0)
+            for ((i, p) in l.withIndex()) {
+                val r = hbox().apply {
+                    setPadding(dp(12), dp(12), dp(8), dp(12))
+                    background = if (i == sel) GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Theme.withAlpha(Theme.accent, 0.25f), Theme.withAlpha(Theme.accent2, 0.10f))).apply { cornerRadius = dp(16).toFloat() } else null
+                }
+                val mini = Weather.mini(this, p)
+                if (mini != null) r.addView(ImageView(this).apply { setImageBitmap(Art.icon(mini[1].toIntOrNull() ?: 3, mini[2] == "true", dp(34))) }, LinearLayout.LayoutParams(dp(34), dp(34)))
+                else r.addView(tv(if (p.gps) "📍" else "🏙", 22f), lp(dp(34), -2))
+                val tl = vbox()
+                tl.addView(tv(if (p.gps) "Moja lokalizacja" else p.name.substringBefore(" ("), 16f, i == sel).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+                tl.addView(tv(if (p.gps) (mini?.getOrNull(3) ?: "według GPS") else p.name.substringAfter("(", "").removeSuffix(")"), 12f, color = DIM).apply { maxLines = 1 })
+                r.addView(tl, lp(0, -2, 1f).apply { leftMargin = dp(12) })
+                if (mini != null) r.addView(tv(Weather.deg(mini[0].toDoubleOrNull() ?: Double.NaN), 20f, true), lp(-2, -2).apply { rightMargin = dp(6) })
+                if (!p.gps) r.addView(tv("✕", 16f, color = DIM).apply { setPadding(dp(10), dp(6), dp(4), dp(6)); setOnClickListener {
+                    val nl = l.filterIndexed { k2, _ -> k2 != i }
+                    Weather.savePlaces(this@MainActivity, nl)
+                    Weather.select(this@MainActivity, if (sel >= nl.size) nl.size - 1 else if (i < sel) sel - 1 else sel)
+                    fill()
+                } })
+                r.setOnClickListener { d.dismiss(); switchPlace(i) }
+                panel.addView(r, lp(top = 4))
+            }
+            panel.addView(tv("Dodaj miejsce", 14f, true, DIM), lp(top = 22))
+            val e = EditText(this).apply { hint = "Wpisz miejscowość, np. Zakopane"; setTextColor(FG); setHintTextColor(DIM); setSingleLine(); background = round(BG, 14); setPadding(dp(12), dp(10), dp(12), dp(10)); imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH }
+            panel.addView(e, lp(top = 6))
+            val res = vbox()
+            fun search() {
+                val q = e.text.toString().trim(); if (q.length < 2) return
+                res.removeAllViews(); res.addView(tv("Szukam…", 13f, color = DIM))
+                Thread {
+                    val found = try { Weather.search(q) } catch (x: Exception) { emptyList() }
+                    h.post {
+                        res.removeAllViews()
+                        if (found.isEmpty()) res.addView(tv("Nic nie znaleziono", 13f, color = DIM))
+                        for (p in found) res.addView(tv("＋  " + p.name, 15f).apply { setPadding(dp(6), dp(10), dp(6), dp(10)); setOnClickListener {
+                            val nl = Weather.places(this@MainActivity).let { if (it.size == 1 && it[0].gps && Prefs.get(this@MainActivity).getString("places", null) == null) it else it } + p
+                            Weather.savePlaces(this@MainActivity, nl)
+                            d.dismiss(); switchPlace(nl.size - 1)
+                        } })
+                    }
+                }.start()
+            }
+            e.setOnEditorActionListener { _, _, _ -> search(); true }
+            panel.addView(btn("Szukaj", true) { search() }, lp(top = 8))
+            panel.addView(res, lp(top = 6))
+            if (l.none { it.gps }) panel.addView(btn("📍 Dodaj „Moja lokalizacja”") {
+                Weather.savePlaces(this@MainActivity, listOf(Place("Moja lokalizacja", 0.0, 0.0, true)) + l); d.dismiss(); switchPlace(0)
+            }, lp(top = 14))
+            panel.addView(tv("Wskazówka: przesuń palcem po karcie pogody w lewo lub w prawo, żeby przełączać miejsca.", 12f, color = DIM), lp(top = 18))
+        }
+        fill()
+        d.show()
     }
 
     private fun placesSheet() {
@@ -565,7 +665,10 @@ class MainActivity : Activity() {
             choice("Wyłączanie", listOf("none" to "Prosty", "math" to "Liczby", "memory" to "Pamięć", "shake" to "Potrząsanie", "captcha" to "Przepisywanie"), a.challenge) { a.challenge = it }
             choice("Trudność / ile razy", listOf("1" to "Łatwo", "2" to "Średnio", "3" to "Trudno"), a.level.toString()) { a.level = it.toInt() }
             choice("Liczba zadań", listOf("1" to "1", "3" to "3", "5" to "5"), a.count.toString()) { a.count = it.toInt() }
-            choice("Drzemka", listOf("5" to "5 min", "9" to "9 min", "10" to "10 min", "15" to "15 min", "20" to "20 min"), a.snooze.toString()) { a.snooze = it.toInt() }
+            choice("Drzemka – pierwszy przycisk", listOf("3" to "3 min", "5" to "5 min", "9" to "9 min", "10" to "10 min", "15" to "15 min"), a.snooze.toString()) { a.snooze = it.toInt() }
+            choice("Drzemka – drugi przycisk", listOf("10" to "10 min", "15" to "15 min", "20" to "20 min", "30" to "30 min"), a.snooze2.toString()) { a.snooze2 = it.toInt() }
+            choice("Wyłączanie: przytrzymaj przycisk", listOf("0" to "bez", "3" to "3 s", "5" to "5 s", "10" to "10 s"), a.hold.toString()) { a.hold = it.toInt() }
+            choice("Przyciski boczne podczas dzwonienia", listOf("none" to "Nic nie robią", "snooze" to "Drzemka"), a.keys) { a.keys = it }
             choice("Maks. drzemek", listOf("0" to "bez", "1" to "1", "3" to "3", "5" to "5", "99" to "bez limitu"), a.maxSnooze.toString()) { a.maxSnooze = it.toInt() }
             choice("Narastanie głośności", listOf("0" to "od razu", "30" to "30 s", "60" to "1 min", "120" to "2 min"), a.ramp.toString()) { a.ramp = it.toInt() }
             choice("Głośność", listOf("40" to "40%", "70" to "70%", "100" to "100%"), a.volume.toString()) { a.volume = it.toInt() }
@@ -643,16 +746,23 @@ class MainActivity : Activity() {
             "day" -> SimpleDateFormat("EEEE, d MMMM", Locale("pl")).format(Date(calDay))
             else -> "Najbliższe wpisy"
         }.replaceFirstChar { it.uppercase() }
-        top.addView(tv("‹", 26f, true).apply { setPadding(0, 0, dp(14), 0); setOnClickListener { calMove(-1) } })
-        top.addView(tv(title, 21f, true), lp(0, -2, 1f))
-        top.addView(btn("Dziś") { calDay = startOfDay(System.currentTimeMillis()); calMonth.timeInMillis = calDay; calMonth.set(Calendar.DAY_OF_MONTH, 1); render() }, lp(-2, -2).apply { rightMargin = dp(8) })
-        top.addView(tv("›", 26f, true).apply { setPadding(dp(14), 0, 0, 0); setOnClickListener { calMove(1) } })
+        fun chip(t: String, on: Boolean, size: Float = 13f, f: () -> Unit) = tv(t, size, on, if (on) Theme.onAccent else FG).apply {
+            maxLines = 1; gravity = Gravity.CENTER; setPadding(dp(12), dp(7), dp(12), dp(7))
+            background = if (on) Theme.gradient(dp(14).toFloat()) else null; setOnClickListener { f() }
+        }
+        top.addView(tv("‹", 24f, true).apply { setPadding(dp(4), 0, dp(10), 0); setOnClickListener { calMove(-1) } })
+        top.addView(tv(title, 19f, true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, lp(0, -2, 1f))
+        top.addView(chip("Dziś", false) { calDay = startOfDay(System.currentTimeMillis()); calMonth.timeInMillis = calDay; calMonth.set(Calendar.DAY_OF_MONTH, 1); render() }.apply { background = round(SURF, 14, 1) })
+        top.addView(tv("›", 24f, true).apply { setPadding(dp(10), 0, dp(4), 0); setOnClickListener { calMove(1) } })
         col.addView(top)
-        val mr = hbox()
-        for ((k, n) in listOf("month" to "Miesiąc", "week" to "Tydzień", "day" to "Dzień", "list" to "Lista")) mr.addView(btn(n, calMode == k) { calMode = k; render() }, lp(0, -2, 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
-        col.addView(mr, lp(top = 10))
+        // jeden pasek przełącznika widoków (bez łamania napisów)
+        val mr = hbox().apply { background = round(SURF, 16); setPadding(dp(3), dp(3), dp(3), dp(3)) }
+        for ((k, n) in listOf("month" to "Miesiąc", "week" to "Tydzień", "day" to "Dzień", "list" to "Lista"))
+            mr.addView(chip(n, calMode == k) { calMode = k; render() }, lp(0, -2, 1f))
+        col.addView(mr, lp(top = 8))
         val add = hbox()
-        for ((t, n) in Rem.TYPES) add.addView(btn("＋ " + n, t == "reminder") { newEv(t, if (calMode == "list") System.currentTimeMillis() + 3600_000L else calDay + 9 * 3600_000L) }, lp(-2, -2).apply { rightMargin = dp(6) })
+        for ((t, n) in Rem.TYPES) add.addView(chip("＋ $n", false, 12.5f) { newEv(t, if (calMode == "list") System.currentTimeMillis() + 3600_000L else calDay + 9 * 3600_000L) }
+            .apply { background = round(SURF, 14, 1); if (t == "reminder") { background = Theme.gradient(dp(14).toFloat()); setTextColor(Theme.onAccent) } }, lp(-2, -2).apply { rightMargin = dp(6) })
         col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(add) }, lp(top = 8))
 
         when (calMode) {

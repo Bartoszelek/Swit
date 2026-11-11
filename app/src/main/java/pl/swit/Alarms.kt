@@ -39,16 +39,19 @@ class Alarm(
     var id: Int, var hour: Int, var min: Int, var days: Int = 0, var on: Boolean = true, var label: String = "",
     var sound: String = "", var vibrate: Boolean = true, var ramp: Int = 30, var snooze: Int = 9, var maxSnooze: Int = 3,
     var challenge: String = "none", var level: Int = 1, var count: Int = 3, var autoStop: Int = 10, var pre: Int = 0,
-    var speak: Boolean = true, var holidays: Boolean = false, var skipUntil: Long = 0, var wakeCheck: Boolean = false, var volume: Int = 100
+    var speak: Boolean = true, var holidays: Boolean = false, var skipUntil: Long = 0, var wakeCheck: Boolean = false, var volume: Int = 100,
+    var hold: Int = 5, var snooze2: Int = 10, var keys: String = "none"
 ) {
     fun json(): JSONObject = JSONObject().put("id", id).put("h", hour).put("m", min).put("d", days).put("on", on).put("l", label).put("s", sound)
         .put("v", vibrate).put("r", ramp).put("sn", snooze).put("ms", maxSnooze).put("ch", challenge).put("lv", level).put("cn", count)
         .put("as", autoStop).put("pre", pre).put("sp", speak).put("hol", holidays).put("sk", skipUntil).put("wc", wakeCheck).put("vol", volume)
+        .put("hold", hold).put("sn2", snooze2).put("keys", keys)
 
     companion object {
         fun of(o: JSONObject) = Alarm(o.optInt("id"), o.optInt("h"), o.optInt("m"), o.optInt("d"), o.optBoolean("on", true), o.optString("l"), o.optString("s"),
             o.optBoolean("v", true), o.optInt("r", 30), o.optInt("sn", 9), o.optInt("ms", 3), o.optString("ch", "none"), o.optInt("lv", 1), o.optInt("cn", 3),
-            o.optInt("as", 10), o.optInt("pre"), o.optBoolean("sp", true), o.optBoolean("hol"), o.optLong("sk"), o.optBoolean("wc"), o.optInt("vol", 100))
+            o.optInt("as", 10), o.optInt("pre"), o.optBoolean("sp", true), o.optBoolean("hol"), o.optLong("sk"), o.optBoolean("wc"), o.optInt("vol", 100),
+            o.optInt("hold", 5), o.optInt("sn2", 10), o.optString("keys", "none"))
     }
 
     fun time() = "%d:%02d".format(hour, min)
@@ -329,11 +332,11 @@ class Ring : Service(), TextToSpeech.OnInitListener {
 
     fun snoozesLeft(): Int { val a = alarm ?: return 0; return a.maxSnooze - Prefs.get(this).getInt("snoozes_$id", 0) }
 
-    fun doSnooze() {
-        val a = alarm ?: return
+    fun doSnooze(minutes: Int = alarm?.snooze ?: 9) {
+        if (alarm == null) return
         val n = Prefs.get(this).getInt("snoozes_$id", 0)
         Prefs.get(this).edit().putInt("snoozes_$id", n + 1).apply()
-        Alarms.snooze(this, id, a.snooze)
+        Alarms.snooze(this, id, minutes)
         stopSelf()
     }
 

@@ -18,6 +18,8 @@
     <string name="wi_clock">Zegar, pogoda i budzik 4×1</string>
     <string name="wi_forecast">Prognoza 4×2 – 5 dni</string>
     <string name="wi_forecast3">Prognoza 4×3 – godziny i dni</string>
+    <string name="wi_forecast4">Prognoza 4×4 – godzina, pogoda, godziny i 5 dni</string>
+    <string name="wi_mini">Minimalistyczny 4×3 – zegar na środku, pod nim pogoda, przezroczyste tło</string>
     <string name="wi_alarm1">Budzik 1×1 – najbliższy alarm</string>
     <string name="wi_alarm2">Budzik 2×1 – najbliższy alarm i drzemka</string>
 </resources>

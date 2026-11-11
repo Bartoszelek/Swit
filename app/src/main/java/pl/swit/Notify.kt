@@ -66,9 +66,10 @@ object Notify {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val title = when (kind) { "timer" -> "Minutnik – koniec"; "pre" -> "Za chwilę budzik ${a?.time() ?: ""}"; else -> a?.label?.ifBlank { null } ?: "Budzik ${a?.time() ?: ""}" }
         val b = Notification.Builder(c, "ring").setSmallIcon(Icon.createWithResource(c, R.drawable.ic_alarm)).setContentTitle(title)
-            .setContentText(if (kind == "alarm" && a?.challenge != "none") "Wyłączenie wymaga zadania" else "Stuknij, żeby wyłączyć")
+            .setContentText(if (kind == "alarm" && a?.challenge != "none") "Wyłączenie wymaga zadania" else if (kind == "alarm" && (a?.hold ?: 0) > 0) "Stuknij i przytrzymaj „Wyłącz”" else "Stuknij, żeby wyłączyć")
             .setCategory(Notification.CATEGORY_ALARM).setFullScreenIntent(full, true).setContentIntent(full).setOngoing(true)
-        if (kind != "alarm" || a?.challenge == "none") b.addAction(Notification.Action.Builder(null, "Wyłącz", act(c, "DISMISS", id, 6100 + id, kind)).build())
+        // budzik wyłącza się tylko na ekranie budzika (przytrzymanie / zadanie) – w powiadomieniu nie ma skrótu „Wyłącz”
+        if (kind != "alarm" || (a?.challenge == "none" && (a.hold) == 0)) b.addAction(Notification.Action.Builder(null, "Wyłącz", act(c, "DISMISS", id, 6100 + id, kind)).build())
         if (kind == "alarm") b.addAction(Notification.Action.Builder(null, "Drzemka ${a?.snooze ?: 9} min", act(c, "SNOOZE", id, 6200 + id)).build())
         return b.build()
     }
@@ -242,6 +243,75 @@ class AlarmActivity : Activity(), SensorEventListener {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() { /* nie pozwalamy uciec przyciskiem wstecz */ }
 
+    /** Przyciski boczne nie wyłączają ani nie ściszają budzika (opcjonalnie: drzemka). */
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN ||
+            keyCode == android.view.KeyEvent.KEYCODE_CAMERA || keyCode == android.view.KeyEvent.KEYCODE_HEADSETHOOK) {
+            if (kind == "alarm" && alarm?.keys == "snooze" && (Ring.active?.snoozesLeft() ?: 0) > 0 && !leaving) { leaving = true; Ring.active?.doSnooze(); finish() }
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent?): Boolean =
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) true else super.onKeyUp(keyCode, event)
+
+    private var leaving = false
+
+    /** Ucieczka przyciskiem Ekran główny / Ostatnie: budzik wraca na ekran, dopóki dzwoni. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        comeBack()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        comeBack()
+    }
+
+    private fun comeBack() {
+        if (isFinishing || leaving || Ring.active == null) return
+        android.os.Handler(mainLooper).postDelayed({
+            if (Ring.active != null && !leaving) try {
+                startActivity(Intent(this, AlarmActivity::class.java).putExtra("id", id).putExtra("kind", kind).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            } catch (e: Exception) {}
+        }, 600)
+    }
+
+    override fun finish() { leaving = true; super.finish() }
+
+    /** Przycisk „przytrzymaj”: wypełnia się przez [sec] sekund; puszczenie wcześniej przerywa. */
+    private fun holdBtn(t: String, sec: Int, f: () -> Unit): TextView {
+        val v = btn(t, false) {}
+        if (sec <= 0) { v.setOnClickListener { f() }; return v }
+        val fill = GradientDrawable().apply { setColor(0x66FFFFFF); cornerRadius = dp(40).toFloat() }
+        val base = v.background
+        val clip = android.graphics.drawable.ClipDrawable(fill, Gravity.START, android.graphics.drawable.ClipDrawable.HORIZONTAL)
+        v.background = android.graphics.drawable.LayerDrawable(arrayOf(base, clip))
+        var anim: android.animation.ValueAnimator? = null
+        v.setOnClickListener(null)
+        v.setOnTouchListener { view, e ->
+            when (e.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    anim?.cancel()
+                    anim = android.animation.ValueAnimator.ofInt(0, 10000).apply {
+                        duration = sec * 1000L
+                        addUpdateListener { clip.level = it.animatedValue as Int }
+                        addListener(object : android.animation.AnimatorListenerAdapter() {
+                            var cancelled = false
+                            override fun onAnimationCancel(an: android.animation.Animator) { cancelled = true }
+                            override fun onAnimationEnd(an: android.animation.Animator) { if (!cancelled) { view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); f() } }
+                        })
+                        start()
+                    }
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { anim?.cancel(); clip.level = 0 }
+            }
+            true
+        }
+        return v
+    }
+
     private fun main() {
         root.removeAllViews()
         val cal = Calendar.getInstance()
@@ -260,11 +330,20 @@ class AlarmActivity : Activity(), SensorEventListener {
         }
         root.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
         val r = Ring.active
-        if (kind == "alarm" && (r?.snoozesLeft() ?: 1) > 0) root.addView(btn("Drzemka ${alarm?.snooze ?: 9} min" + (r?.let { " (zostało ${it.snoozesLeft()})" } ?: ""), true) {
-            Ring.active?.doSnooze() ?: Alarms.snooze(this, id, alarm?.snooze ?: 9); finish()
-        }, lp(0))
-        root.addView(btn(if (kind == "alarm" && alarm?.challenge != "none") "Wyłącz (zadanie)" else "Wyłącz", kind != "alarm") {
-            if (kind == "alarm" && alarm?.challenge != "none") challenge() else dismiss()
+        val a = alarm
+        if (kind == "alarm" && (r?.snoozesLeft() ?: 1) > 0) {
+            // drzemka od ręki – jednym stuknięciem, dwie długości
+            val sr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (m in listOf(a?.snooze ?: 5, a?.snooze2 ?: 10).distinct()) sr.addView(btn("💤 $m min", true) {
+                Ring.active?.doSnooze(m) ?: Alarms.snooze(this, id, m); finish()
+            }, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(4), 0, dp(4), 0) })
+            root.addView(sr, lp(0))
+            r?.let { root.addView(tv("Zostało drzemek: ${it.snoozesLeft()}", 13f, color = 0xCCFFFFFF.toInt()), lp(6)) }
+        }
+        val holdSec = if (kind == "alarm") (a?.hold ?: 5) else 0
+        val label = if (kind == "alarm" && a?.challenge != "none") "Wyłącz (zadanie)" else "Wyłącz"
+        root.addView(holdBtn(if (holdSec > 0) "Przytrzymaj $holdSec s – $label" else label, holdSec) {
+            if (kind == "alarm" && a?.challenge != "none") challenge() else dismiss()
         }, lp(14))
     }
 

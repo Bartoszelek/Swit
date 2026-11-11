@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center">
-<TextView android:id="@+id/c_top" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFFFF" android:textSize="11sp" android:maxLines="1" />
-<ImageView android:id="@+id/c_icon" android:layout_width="24dp" android:layout_height="24dp" android:layout_marginTop="2dp" />
-<TextView android:id="@+id/c_bot" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFFFF" android:textSize="12sp" android:textStyle="bold" android:maxLines="1" />
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal">
+<TextView android:id="@+id/c_top" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFFFF" android:textSize="11sp" android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false"  android:shadowColor="#55000000" android:shadowRadius="6" android:shadowDy="1" android:alpha="0.85"/>
+<ImageView android:id="@+id/c_icon" android:layout_width="26dp" android:layout_height="26dp" android:layout_marginTop="3dp" android:layout_marginBottom="3dp" />
+<TextView android:id="@+id/c_bot" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFFFF" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" android:fontFamily="sans-serif-medium" android:shadowColor="#55000000" android:shadowRadius="6" android:shadowDy="1" />
 </LinearLayout>

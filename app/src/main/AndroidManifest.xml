@@ -142,6 +142,30 @@
         </receiver>
 
         <receiver
+            android:name=".WForecast4"
+            android:exported="true"
+            android:label="Prognoza 4×4">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/wi_forecast4" />
+        </receiver>
+
+        <receiver
+            android:name=".WMinimal"
+            android:exported="true"
+            android:label="Zegar minimalistyczny">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/wi_mini" />
+        </receiver>
+
+        <receiver
             android:name=".WAlarm1"
             android:exported="true"
             android:label="Budzik 1×1">
