@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:configure="pl.swit.WidgetSetup"
+    android:widgetFeatures="reconfigurable|configuration_optional"
     android:minWidth="40dp" android:minHeight="40dp"
     android:minResizeWidth="40dp" android:minResizeHeight="40dp"
     android:targetCellWidth="1" android:targetCellHeight="1"
-    android:maxResizeWidth="600dp" android:maxResizeHeight="600dp"
+    android:maxResizeWidth="2000dp" android:maxResizeHeight="2000dp"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen|keyguard"
     android:updatePeriodMillis="1800000"

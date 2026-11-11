@@ -259,6 +259,7 @@ class MainActivity : Activity() {
         })
         hero.setOnTouchListener { _, e -> gd.onTouchEvent(e) }
         col.addView(hero, lp(-1, dp(230), top = 12))
+        col.addView(btn("🗺  Zaawansowana pogoda: mapy, wykresy, 40 dni", true) { startActivity(Intent(this, AdvActivity::class.java)) }, lp(top = 10))
         val nc = Weather.nowcast(f)
         if (nc.isNotEmpty()) col.addView(tv("☂ $nc", 15f, true), lp(top = 10))
         for ((_, w) in Weather.warnings(f)) col.addView(tv("⚠ $w", 14f, true, 0xFFFFB020.toInt()), lp(top = 6))
@@ -1197,12 +1198,19 @@ class MainActivity : Activity() {
         col.addView(btn("Pora snu…") { sleepSheet() }, lp(-2, -2, top = 6))
 
         header("Widżety")
-        val ws = pr().getString("widgetStyle", if (pr().getBoolean("widgetLight", false)) "light" else "weather") ?: "weather"
-        val wr = hbox()
-        for ((k, n) in listOf("weather" to "Niebo wg pogody", "glass" to "Szkło", "dark" to "Ciemne", "light" to "Jasne"))
-            wr.addView(btn(n, ws == k) { pr().edit().putString("widgetStyle", k).apply(); Widgets.updateAll(this); render() }, lp(-2, -2).apply { rightMargin = dp(6) })
-        col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(wr) }, lp(top = 4))
-        col.addView(tv("Dostępne: Pogoda 1×1, 2×1, 2×2 · Zegar i pogoda 4×1 · Prognoza 4×2 i 4×3 · Budzik 1×1 i 2×1. Każdy sam dopasowuje układ po zmianie rozmiaru. Dodasz je, przytrzymując pusty ekran → Widżety → Świt.", 12f, color = DIM), lp(top = 4))
+        val placed = Widgets.placed(this)
+        if (placed.isEmpty()) col.addView(tv("Nie masz jeszcze widżetów Świtu. Przytrzymaj pusty ekran → Widżety → Świt.", 13f, color = DIM), lp(top = 4))
+        else {
+            col.addView(tv("Stuknij widżet, żeby ustawić, co pokazuje, tło, przezroczystość, rozmiary i położenie.", 12f, color = DIM), lp(top = 2))
+            for ((wid, name) in placed) {
+                val r = hbox().apply { setPadding(dp(14), dp(12), dp(14), dp(12)); background = round(SURF, 16) }
+                r.addView(tv("▦  $name", 15f), lp(0, -2, 1f))
+                r.addView(tv("Dostosuj ›", 14f, true, Theme.accent))
+                r.setOnClickListener { startActivity(Intent(this, WidgetSetup::class.java).putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, wid)) }
+                col.addView(r, lp(top = 6))
+            }
+        }
+        col.addView(tv("Na ekranie głównym: przytrzymaj widżet → „Ustawienia” otwiera to samo okno. Rozmiar zmienisz, przeciągając uchwyty – każdy widżet można zmniejszyć do 1×1 i powiększyć na cały ekran.", 12f, color = DIM), lp(top = 8))
 
         header("Aktualizacje")
         col.addView(tv("Wersja: " + (try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { "?" }), 14f, color = DIM))

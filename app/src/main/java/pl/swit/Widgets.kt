@@ -30,29 +30,27 @@ object Widgets {
 
     fun updateAll(c: Context) {
         val m = AppWidgetManager.getInstance(c)
-        m.getAppWidgetIds(ComponentName(c, WMinimal::class.java)).takeIf { it.isNotEmpty() }?.let { minimal(c, m, it) }
-        for (cls in WEATHER + ALARM) {
+        for (cls in WEATHER + ALARM + listOf(WMinimal::class.java)) {
             val ids = m.getAppWidgetIds(ComponentName(c, cls))
-            if (ids.isNotEmpty()) update(c, m, ids, cls in ALARM)
+            if (ids.isNotEmpty()) update(c, m, ids, false)
         }
     }
 
-    fun update(c: Context, m: AppWidgetManager, ids: IntArray, alarm: Boolean) {
-        val f = Weather.cached(c)
-        for (id in ids) {
-            val rv = if (Build.VERSION.SDK_INT >= 31) {
-                if (alarm) RemoteViews(mapOf(SizeF(40f, 40f) to alarmView(c, R.layout.wa_1x1), SizeF(110f, 40f) to alarmView(c, R.layout.wa_2x1)))
-                else RemoteViews(mapOf(
-                    SizeF(40f, 40f) to weatherView(c, R.layout.wg_1x1, f),
-                    SizeF(110f, 40f) to weatherView(c, R.layout.wg_2x1, f),
-                    SizeF(110f, 100f) to weatherView(c, R.layout.wg_2x2, f),
-                    SizeF(240f, 40f) to weatherView(c, R.layout.wg_4x1, f),
-                    SizeF(240f, 100f) to weatherView(c, R.layout.wg_4x2, f),
-                    SizeF(240f, 190f) to weatherView(c, R.layout.wg_4x3, f),
-                    SizeF(240f, 280f) to weatherView(c, R.layout.wg_4x4, f)))
-            } else if (alarm) alarmView(c, R.layout.wa_2x1) else weatherView(c, R.layout.wg_2x2, f)
-            m.updateAppWidget(id, rv)
-        }
+    /** Każdy widżet ma własny projekt (Ustawienia widżetu) – elementy, tło, przezroczystość, rozmiary. */
+    fun update(c: Context, m: AppWidgetManager, ids: IntArray, @Suppress("UNUSED_PARAMETER") alarm: Boolean) {
+        for (id in ids) try {
+            val o = m.getAppWidgetOptions(id)
+            m.updateAppWidget(id, WD.render(c, WD.get(c, id), o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH), o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)))
+        } catch (e: Exception) {}
+    }
+
+    /** Wszystkie widżety Świtu na ekranie: (id, nazwa rodzaju). */
+    fun placed(c: Context): List<Pair<Int, String>> {
+        val m = AppWidgetManager.getInstance(c)
+        val names = mapOf(WWeather1::class.java to "Pogoda 1×1", WWeather2::class.java to "Pogoda 2×1", WWeather::class.java to "Pogoda 2×2",
+            WClock::class.java to "Zegar i pogoda 4×1", WForecast::class.java to "Prognoza 4×2", WForecast3::class.java to "Prognoza 4×3",
+            WForecast4::class.java to "Prognoza 4×4", WMinimal::class.java to "Zegar minimalistyczny", WAlarm1::class.java to "Budzik 1×1", WAlarm2::class.java to "Budzik 2×1")
+        return names.flatMap { (cls, n) -> m.getAppWidgetIds(ComponentName(c, cls)).map { it to n } }
     }
 
     private fun text(rv: RemoteViews, c: Context, id: Int, s: String) { rv.setTextViewText(id, s); rv.setTextColor(id, fg(c)) }
@@ -194,6 +192,8 @@ abstract class BaseWidget(private val alarm: Boolean) : AppWidgetProvider() {
     override fun onAppWidgetOptionsChanged(c: Context, m: AppWidgetManager, id: Int, o: android.os.Bundle) = Widgets.update(c, m, intArrayOf(id), alarm)
 
     override fun onEnabled(c: Context) { Notify.schedule(c) }
+
+    override fun onDeleted(c: Context, ids: IntArray) { val e = Prefs.get(c).edit(); for (id in ids) e.remove("wd_$id"); e.apply() }
 }
 
 class WWeather1 : BaseWidget(false)
@@ -208,9 +208,13 @@ class WAlarm2 : BaseWidget(true)
 
 class WMinimal : AppWidgetProvider() {
     override fun onUpdate(c: Context, m: AppWidgetManager, ids: IntArray) {
-        Widgets.minimal(c, m, ids)
+        Widgets.update(c, m, ids, false)
         if (Weather.cached(c) == null) Thread { try { Weather.refresh(c); Widgets.updateAll(c) } catch (e: Exception) {} }.start()
     }
 
     override fun onEnabled(c: Context) { Notify.schedule(c) }
+
+    override fun onDeleted(c: Context, ids: IntArray) { val e = Prefs.get(c).edit(); for (id in ids) e.remove("wd_$id"); e.apply() }
+
+    override fun onAppWidgetOptionsChanged(c: Context, m: AppWidgetManager, id: Int, o: android.os.Bundle) = Widgets.update(c, m, intArrayOf(id), false)
 }

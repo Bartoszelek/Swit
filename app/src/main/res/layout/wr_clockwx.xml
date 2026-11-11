@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/r_row" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+    <TextClock android:id="@+id/r_clock" android:layout_width="wrap_content" android:layout_height="wrap_content" android:format24Hour="H:mm" android:format12Hour="h:mm" android:textColor="#FFFFFFFF" android:textSize="56sp" android:fontFamily="sans-serif-light" android:includeFontPadding="false" android:shadowColor="#66000000" android:shadowRadius="6" android:shadowDy="1" />
+    <TextView android:id="@+id/r_gap" android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+    <ImageView android:id="@+id/r_icon" android:layout_width="48dp" android:layout_height="48dp" android:scaleType="fitCenter" />
+    <TextView android:id="@+id/r_temp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFFFF" android:textSize="40sp" android:fontFamily="sans-serif-light" android:includeFontPadding="false" android:layout_marginStart="4dp" android:shadowColor="#66000000" android:shadowRadius="6" android:shadowDy="1" />
+</LinearLayout>

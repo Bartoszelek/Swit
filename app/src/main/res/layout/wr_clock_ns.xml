@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/r_row" android:layout_width="wrap_content" android:layout_height="wrap_content"><TextClock android:id="@+id/r_clock" android:layout_width="wrap_content" android:layout_height="wrap_content" android:format24Hour="H:mm" android:format12Hour="h:mm" android:textColor="#FFFFFFFF" android:textSize="56sp" android:fontFamily="sans-serif-light" android:includeFontPadding="false" /></LinearLayout>
